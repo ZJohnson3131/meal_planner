@@ -16,9 +16,17 @@ Use inline execution in a fresh implementation session. Work through tasks seque
 
 1. Run the listed verification command.
 2. Commit the task.
-3. Stop briefly and report the result before continuing.
+3. Update this implementation plan to reflect completed steps and the next active task.
+4. Stop briefly and report the result before continuing.
 
 The implementation session should first invoke `superpowers:executing-plans`. When writing application code, invoke `superpowers:test-driven-development` for feature or bugfix tasks.
+
+Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then merge back after verification.
+
+## Progress Log
+
+- 2026-05-15: Task 1, Scaffold The Next.js Application, completed and merged via PR #1.
+- 2026-05-15: Current next task is Task 2, Add Test Tooling.
 
 ## Approved Spec
 
@@ -147,7 +155,7 @@ Create this structure:
 - Create: `.gitignore`
 - Create: `README.md`
 
-- [ ] **Step 1: Generate the app scaffold**
+- [x] **Step 1: Generate the app scaffold**
 
 Run:
 
@@ -157,7 +165,7 @@ npx create-next-app@latest . --ts --app --tailwind --eslint --src-dir false --im
 
 Expected: project files are created in the repo root. If the command refuses because the directory is not empty, create a temporary directory with the same command and copy only the generated app/tooling files into this repo, preserving `docs/`.
 
-- [ ] **Step 2: Install MVP dependencies**
+- [x] **Step 2: Install MVP dependencies**
 
 Run:
 
@@ -168,7 +176,7 @@ npm install -D vitest @vitejs/plugin-react jsdom @testing-library/react @testing
 
 Expected: dependencies are added to `package.json` and `package-lock.json`.
 
-- [ ] **Step 3: Ensure core scripts exist**
+- [x] **Step 3: Ensure core scripts exist**
 
 Edit `package.json` scripts to include:
 
@@ -190,7 +198,7 @@ Edit `package.json` scripts to include:
 }
 ```
 
-- [ ] **Step 4: Add minimal landing route**
+- [x] **Step 4: Add minimal landing route**
 
 Set `app/page.tsx`:
 
@@ -225,7 +233,7 @@ export default function HomePage() {
 }
 ```
 
-- [ ] **Step 5: Verify scaffold**
+- [x] **Step 5: Verify scaffold**
 
 Run:
 
@@ -236,7 +244,7 @@ npm run lint
 
 Expected: both commands pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
