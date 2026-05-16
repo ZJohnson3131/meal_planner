@@ -21,7 +21,7 @@ Use inline execution in a fresh implementation session. Work through tasks seque
 
 The implementation session should first invoke `superpowers:executing-plans`. When writing application code, invoke `superpowers:test-driven-development` for feature or bugfix tasks.
 
-Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then merge back after verification.
+Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then open a PR after verification. The user owns review approval and merging; do not merge PRs or fast-forward branches into `main` unless the user explicitly asks for that specific merge. PR descriptions must summarize the changes, current functionality, verification results, and any UI surfaces that need user testing.
 
 ## Progress Log
 
