@@ -26,7 +26,9 @@ Never implement directly on `main`. Create an isolated branch or worktree for ea
 ## Progress Log
 
 - 2026-05-15: Task 1, Scaffold The Next.js Application, completed and merged via PR #1.
-- 2026-05-15: Current next task is Task 2, Add Test Tooling.
+- 2026-05-15: Task 2, Add Test Tooling, selected as the next active task.
+- 2026-05-16: Task 2, Add Test Tooling, completed on branch `task-2-test-tooling`.
+- 2026-05-16: Current next task is Task 3, Add Local Supabase And Docker Setup.
 
 ## Approved Spec
 
@@ -262,7 +264,7 @@ git commit -m "chore: scaffold Next.js meal planner app"
 - Create: `playwright.config.ts`
 - Modify: `package.json`
 
-- [ ] **Step 1: Create Vitest config**
+- [x] **Step 1: Create Vitest config**
 
 Create `vitest.config.ts`:
 
@@ -277,6 +279,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    passWithNoTests: true,
   },
   resolve: {
     alias: {
@@ -286,7 +289,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: Create test setup**
+- [x] **Step 2: Create test setup**
 
 Create `tests/setup.ts`:
 
@@ -294,7 +297,7 @@ Create `tests/setup.ts`:
 import "@testing-library/jest-dom/vitest";
 ```
 
-- [ ] **Step 3: Create Playwright config**
+- [x] **Step 3: Create Playwright config**
 
 Create `playwright.config.ts`:
 
@@ -320,7 +323,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Add a smoke test**
+- [x] **Step 4: Add a smoke test**
 
 Create `tests/e2e/mvp-flow.spec.ts`:
 
@@ -335,7 +338,7 @@ test("landing page exposes auth entry points", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 5: Verify tests**
+- [x] **Step 5: Verify tests**
 
 Run:
 
@@ -346,7 +349,7 @@ npm run test:e2e
 
 Expected: Vitest runs with no tests or passing setup; Playwright smoke test passes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
