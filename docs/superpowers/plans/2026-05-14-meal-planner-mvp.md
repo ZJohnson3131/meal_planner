@@ -29,6 +29,8 @@ Never implement directly on `main`. Create an isolated branch or worktree for ea
 - 2026-05-15: Task 2, Add Test Tooling, selected as the next active task.
 - 2026-05-16: Task 2, Add Test Tooling, completed on branch `task-2-test-tooling`.
 - 2026-05-16: Current next task is Task 3, Add Local Supabase And Docker Setup.
+- 2026-05-17: Task 3, Add Local Supabase And Docker Setup, completed on branch `task-3-supabase-docker`.
+- 2026-05-17: Current next task is Task 4, Create Database Schema And RLS Policies.
 
 ## Approved Spec
 
@@ -369,7 +371,7 @@ git commit -m "test: add Vitest and Playwright setup"
 - Create: `docker-compose.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Initialize Supabase local files**
+- [x] **Step 1: Initialize Supabase local files**
 
 Run:
 
@@ -379,7 +381,7 @@ npx supabase init
 
 Expected: `supabase/config.toml` exists.
 
-- [ ] **Step 2: Start Supabase locally**
+- [x] **Step 2: Start Supabase locally**
 
 Run:
 
@@ -389,7 +391,7 @@ npx supabase start
 
 Expected: local API URL, anon key, service role key, and database URL are printed. Copy only local development values into `.env.local`.
 
-- [ ] **Step 3: Add environment templates**
+- [x] **Step 3: Add environment templates**
 
 Create `.env.example`:
 
@@ -402,7 +404,7 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
 Create `.env.local` with the values printed by `npx supabase start`. Never commit `.env.local`.
 
-- [ ] **Step 4: Add Dockerfile**
+- [x] **Step 4: Add Dockerfile**
 
 Create `Dockerfile`:
 
@@ -428,7 +430,7 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 ```
 
-- [ ] **Step 5: Configure standalone output**
+- [x] **Step 5: Configure standalone output**
 
 Modify `next.config.ts`:
 
@@ -442,7 +444,7 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-- [ ] **Step 6: Add app Docker Compose service**
+- [x] **Step 6: Add app Docker Compose service**
 
 Create `docker-compose.yml`:
 
@@ -458,7 +460,7 @@ services:
       NODE_ENV: production
 ```
 
-- [ ] **Step 7: Update ignore rules**
+- [x] **Step 7: Update ignore rules**
 
 Ensure `.gitignore` includes:
 
@@ -472,7 +474,7 @@ test-results
 playwright-report
 ```
 
-- [ ] **Step 8: Verify local setup**
+- [x] **Step 8: Verify local setup**
 
 Run:
 
@@ -483,7 +485,7 @@ npm run build
 
 Expected: both pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Run:
 
