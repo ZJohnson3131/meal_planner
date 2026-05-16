@@ -30,7 +30,8 @@ Never implement directly on `main`. Create an isolated branch or worktree for ea
 - 2026-05-16: Task 2, Add Test Tooling, completed on branch `task-2-test-tooling`.
 - 2026-05-16: Current next task is Task 3, Add Local Supabase And Docker Setup.
 - 2026-05-17: Task 3, Add Local Supabase And Docker Setup, completed on branch `task-3-supabase-docker`.
-- 2026-05-17: Current next task is Task 4, Create Database Schema And RLS Policies.
+- 2026-05-17: Task 4, Create Database Schema And RLS Policies, completed on branch `task-4-database-schema`.
+- 2026-05-17: Current next task is Task 5, Add Supabase Clients And Auth Guard.
 
 ## Approved Spec
 
@@ -502,7 +503,7 @@ git commit -m "chore: add local Supabase and Docker setup"
 - Create: `supabase/seed.sql`
 - Create: `supabase/tests/rls.sql`
 
-- [ ] **Step 1: Write migration**
+- [x] **Step 1: Write migration**
 
 Create `supabase/migrations/0001_initial_schema.sql`:
 
@@ -773,7 +774,7 @@ with check (
 create policy "shopping_providers_read" on public.shopping_providers for select using (true);
 ```
 
-- [ ] **Step 2: Add seed data**
+- [x] **Step 2: Add seed data**
 
 Create `supabase/seed.sql`:
 
@@ -786,7 +787,7 @@ values
 on conflict (code) do nothing;
 ```
 
-- [ ] **Step 3: Add RLS smoke checks**
+- [x] **Step 3: Add RLS smoke checks**
 
 Create `supabase/tests/rls.sql`:
 
@@ -802,7 +803,7 @@ where schemaname = 'public'
 order by tablename;
 ```
 
-- [ ] **Step 4: Reset local database**
+- [x] **Step 4: Reset local database**
 
 Run:
 
@@ -812,7 +813,7 @@ npx supabase db reset
 
 Expected: migration and seed apply cleanly.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
