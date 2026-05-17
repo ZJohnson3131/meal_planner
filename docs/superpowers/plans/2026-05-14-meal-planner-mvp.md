@@ -39,6 +39,8 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: Current next task is Task 6, Implement Auth Pages And App Shell.
 - 2026-05-17: Task 6, Implement Auth Pages And App Shell, completed on branch `task-6-auth-pages-app-shell`.
 - 2026-05-17: Current next task is Task 7, Implement Unit Conversion Domain Logic.
+- 2026-05-17: Task 7, Implement Unit Conversion Domain Logic, completed on branch `task-7-unit-conversion`.
+- 2026-05-17: Current next task is Task 8, Implement Ingredient Aggregation And Pantry Delta.
 
 ## Approved Spec
 
@@ -1214,7 +1216,7 @@ git commit -m "feat: add authentication pages and app shell"
 - Create: `tests/domain/units.test.ts`
 - Create: `lib/domain/units.ts`
 
-- [ ] **Step 1: Write failing unit tests**
+- [x] **Step 1: Write failing unit tests**
 
 Create `tests/domain/units.test.ts`:
 
@@ -1249,7 +1251,7 @@ describe("unit conversion", () => {
 });
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1259,7 +1261,7 @@ npm run test -- tests/domain/units.test.ts
 
 Expected: fail because `lib/domain/units.ts` does not exist.
 
-- [ ] **Step 3: Implement units module**
+- [x] **Step 3: Implement units module**
 
 Create `lib/domain/units.ts`:
 
@@ -1320,7 +1322,7 @@ export function convertQuantity(quantity: number, fromUnit: string, toUnit: stri
 }
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -1331,7 +1333,7 @@ npm run typecheck
 
 Expected: tests and typecheck pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
