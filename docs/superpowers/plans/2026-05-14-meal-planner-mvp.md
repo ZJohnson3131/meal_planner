@@ -43,6 +43,8 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: Current next task is Task 8, Implement Ingredient Aggregation And Pantry Delta.
 - 2026-05-17: Task 8, Implement Ingredient Aggregation And Pantry Delta, completed on branch `task-8-ingredient-aggregation-pantry-delta`.
 - 2026-05-17: Current next task is Task 9, Implement Meal Completion Deduction Logic.
+- 2026-05-17: Task 9, Implement Meal Completion Deduction Logic, completed on branch `task-9-meal-completion-deductions`.
+- 2026-05-17: Current next task is Task 10, Implement Recipe Validation And Ingestion.
 
 ## Approved Spec
 
@@ -1624,7 +1626,7 @@ git commit -m "feat: calculate pantry delta from planned ingredients"
 - Create: `tests/domain/pantry-deductions.test.ts`
 - Create: `lib/domain/pantry-deductions.ts`
 
-- [ ] **Step 1: Write failing deduction tests**
+- [x] **Step 1: Write failing deduction tests**
 
 Create `tests/domain/pantry-deductions.test.ts`:
 
@@ -1682,7 +1684,7 @@ describe("buildDeductionPlan", () => {
 });
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1692,7 +1694,7 @@ npm run test -- tests/domain/pantry-deductions.test.ts
 
 Expected: fail because implementation file does not exist.
 
-- [ ] **Step 3: Implement deduction planner**
+- [x] **Step 3: Implement deduction planner**
 
 Create `lib/domain/pantry-deductions.ts`:
 
@@ -1800,7 +1802,7 @@ export function buildDeductionPlan(input: {
 }
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -1811,7 +1813,7 @@ npm run typecheck
 
 Expected: tests and typecheck pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
