@@ -37,6 +37,8 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: PR Review Agent MVP workflow approved for documentation update; during MVP task mode it will review, verify, coordinate fixes, squash-merge approved PRs, sync from GitHub, and return the local workspace to `main`.
 - 2026-05-17: Task 5, Add Supabase Clients And Auth Guard, completed on branch `task-5-supabase-auth-guard-v2`.
 - 2026-05-17: Current next task is Task 6, Implement Auth Pages And App Shell.
+- 2026-05-17: Task 6, Implement Auth Pages And App Shell, completed on branch `task-6-auth-pages-app-shell`.
+- 2026-05-17: Current next task is Task 7, Implement Unit Conversion Domain Logic.
 
 ## Approved Spec
 
@@ -1065,7 +1067,7 @@ git commit -m "feat: add Supabase auth clients and household guard"
 - Create: `app/(app)/dashboard/page.tsx`
 - Create: `components/app-nav.tsx`
 
-- [ ] **Step 1: Add auth actions**
+- [x] **Step 1: Add auth actions**
 
 Create `app/actions/auth.ts`:
 
@@ -1114,15 +1116,15 @@ export async function signOut() {
 }
 ```
 
-- [ ] **Step 2: Add login page**
+- [x] **Step 2: Add login page**
 
 Create `app/(auth)/login/page.tsx` with a form that posts to `signIn`, using email and password fields and a link to `/signup`.
 
-- [ ] **Step 3: Add signup page**
+- [x] **Step 3: Add signup page**
 
 Create `app/(auth)/signup/page.tsx` with a form that posts to `signUp`, using display name, email, and password fields and a link to `/login`.
 
-- [ ] **Step 4: Add app navigation**
+- [x] **Step 4: Add app navigation**
 
 Create `components/app-nav.tsx`:
 
@@ -1161,7 +1163,7 @@ export function AppNav() {
 }
 ```
 
-- [ ] **Step 5: Add protected layout**
+- [x] **Step 5: Add protected layout**
 
 Create `app/(app)/layout.tsx`:
 
@@ -1181,11 +1183,11 @@ export default async function ProtectedLayout({ children }: { children: React.Re
 }
 ```
 
-- [ ] **Step 6: Add dashboard**
+- [x] **Step 6: Add dashboard**
 
 Create `app/(app)/dashboard/page.tsx` with links to Recipes, Planner, Pantry, and Shopping and short current-MVP labels.
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run:
 
@@ -1196,7 +1198,7 @@ npm run lint
 
 Expected: both pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Run:
 
