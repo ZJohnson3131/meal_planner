@@ -21,7 +21,9 @@ Use inline execution in a fresh implementation session. Work through tasks seque
 
 The implementation session should first invoke `superpowers:executing-plans`. When writing application code, invoke `superpowers:test-driven-development` for feature or bugfix tasks.
 
-Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then open a PR after verification. The user owns review approval and merging; do not merge PRs or fast-forward branches into `main` unless the user explicitly asks for that specific merge. PR descriptions must summarize the changes, current functionality, verification results, and any UI surfaces that need user testing.
+Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then open a PR after implementation-agent verification. During MVP task mode, route every non-documentation task PR to the PR Review Agent. The PR Review Agent must review the PR, run required verification independently, coordinate fixes for blocking findings, and merge approved MVP task PRs with `gh pr merge --squash`. After a successful merge, sync local `main` from GitHub and leave the working tree on `main`. PR descriptions must summarize the changes, current functionality, verification results, and any UI surfaces that need user testing.
+
+MVP task mode lasts until every task in this plan is complete. After that, the PR Review Agent remains available but dormant unless the user explicitly invokes it. Post-MVP, the user owns UI testing, final implementation feedback, review approval, and merge decisions unless they explicitly delegate that authority again.
 
 ## Progress Log
 
@@ -32,6 +34,7 @@ Never implement directly on `main`. Create an isolated branch or worktree for ea
 - 2026-05-17: Task 3, Add Local Supabase And Docker Setup, completed on branch `task-3-supabase-docker`.
 - 2026-05-17: Task 4, Create Database Schema And RLS Policies, completed on branch `task-4-database-schema`.
 - 2026-05-17: Current next task is Task 5, Add Supabase Clients And Auth Guard.
+- 2026-05-17: PR Review Agent MVP workflow approved for documentation update; during MVP task mode it will review, verify, coordinate fixes, squash-merge approved PRs, sync from GitHub, and return the local workspace to `main`.
 
 ## Approved Spec
 
