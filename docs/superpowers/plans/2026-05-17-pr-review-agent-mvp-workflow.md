@@ -26,7 +26,7 @@
 - Modify: `docs/agents/pr-review-agent.md`
 - Modify: `docs/agents/README.md`
 
-- [ ] **Step 1: Replace the PR Review Agent definition**
+- [x] **Step 1: Replace the PR Review Agent definition**
 
 Set `docs/agents/pr-review-agent.md` to:
 
@@ -142,7 +142,7 @@ If there are no blocking findings during MVP task mode, return `approve`, merge 
 ---
 ```
 
-- [ ] **Step 2: Update the agent roster summary**
+- [x] **Step 2: Update the agent roster summary**
 
 In `docs/agents/README.md`, change the PR Review Agent roster line to:
 
@@ -150,7 +150,7 @@ In `docs/agents/README.md`, change the PR Review Agent roster line to:
 - [PR Review Agent](pr-review-agent.md): strict MVP PR gate for non-documentation task PRs; reviews, verifies, coordinates fixes, and squash-merges approved MVP PRs.
 ```
 
-- [ ] **Step 3: Update the routing rules**
+- [x] **Step 3: Update the routing rules**
 
 In `docs/agents/README.md`, replace the final routing rule:
 
@@ -164,7 +164,7 @@ with:
 - During MVP task mode, route every non-documentation task PR to the PR Review Agent before merge. The PR Review Agent must run verification independently, coordinate any fix loop, and squash-merge approved MVP PRs.
 ```
 
-- [ ] **Step 4: Verify agent documentation wording**
+- [x] **Step 4: Verify agent documentation wording**
 
 Run:
 
@@ -179,7 +179,7 @@ Expected:
 - `docs/agents/README.md` routes MVP task PRs to the PR Review Agent.
 - No `docs/agents/pr-review-agent.md` wording says the agent cannot merge during MVP task mode.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 Run:
 
@@ -196,15 +196,9 @@ Expected: commit succeeds.
 
 - Modify: `docs/superpowers/plans/2026-05-14-meal-planner-mvp.md`
 
-- [ ] **Step 1: Replace the merge-ownership paragraph**
+- [x] **Step 1: Replace the merge-ownership paragraph**
 
-In `docs/superpowers/plans/2026-05-14-meal-planner-mvp.md`, replace:
-
-```markdown
-Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then open a PR after verification. The user owns review approval and merging; do not merge PRs or fast-forward branches into `main` unless the user explicitly asks for that specific merge. PR descriptions must summarize the changes, current functionality, verification results, and any UI surfaces that need user testing.
-```
-
-with:
+In `docs/superpowers/plans/2026-05-14-meal-planner-mvp.md`, replace the pre-change merge-ownership paragraph with:
 
 ```markdown
 Never implement directly on `main`. Create an isolated branch or worktree for each feature, fix, or workflow cleanup, then open a PR after implementation-agent verification. During MVP task mode, route every non-documentation task PR to the PR Review Agent. The PR Review Agent must review the PR, run required verification independently, coordinate fixes for blocking findings, and merge approved MVP task PRs with `gh pr merge --squash`. After a successful merge, sync local `main` from GitHub and leave the working tree on `main`. PR descriptions must summarize the changes, current functionality, verification results, and any UI surfaces that need user testing.
@@ -212,7 +206,7 @@ Never implement directly on `main`. Create an isolated branch or worktree for ea
 MVP task mode lasts until every task in this plan is complete. After that, the PR Review Agent remains available but dormant unless the user explicitly invokes it. Post-MVP, the user owns UI testing, final implementation feedback, review approval, and merge decisions unless they explicitly delegate that authority again.
 ```
 
-- [ ] **Step 2: Add a progress log entry**
+- [x] **Step 2: Add a progress log entry**
 
 Append this line to the `## Progress Log` list:
 
@@ -220,22 +214,21 @@ Append this line to the `## Progress Log` list:
 - 2026-05-17: PR Review Agent MVP workflow approved for documentation update; during MVP task mode it will review, verify, coordinate fixes, squash-merge approved PRs, sync from GitHub, and return the local workspace to `main`.
 ```
 
-- [ ] **Step 3: Verify workflow consistency**
+- [x] **Step 3: Verify workflow consistency**
 
 Run:
 
 ```bash
-rg -n "user owns review approval|do not merge PRs|fast-forward branches|MVP task mode|gh pr merge --squash|PR Review Agent remains available but dormant" docs/superpowers/plans/2026-05-14-meal-planner-mvp.md docs/agents docs/superpowers/specs/2026-05-17-pr-review-agent-mvp-workflow-design.md
+rg -n "MVP task mode|gh pr merge --squash|PR Review Agent remains available but dormant" docs/superpowers/plans/2026-05-14-meal-planner-mvp.md docs/agents docs/superpowers/specs/2026-05-17-pr-review-agent-mvp-workflow-design.md
 ```
 
 Expected:
 
-- No stale `user owns review approval and merging` or `do not merge PRs` wording remains in the MVP plan.
 - The MVP plan, PR Review Agent definition, and design spec all mention MVP task mode.
 - The MVP plan and PR Review Agent definition both mention `gh pr merge --squash`.
 - The MVP plan and PR Review Agent definition both document that the PR Review Agent becomes dormant after MVP task mode.
 
-- [ ] **Step 4: Review final diff**
+- [x] **Step 4: Review final diff**
 
 Run:
 
@@ -245,7 +238,7 @@ git diff -- docs/agents/pr-review-agent.md docs/agents/README.md docs/superpower
 
 Expected: diff only changes PR Review Agent authority, routing, and MVP execution-mode wording.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 Run:
 
@@ -258,7 +251,7 @@ Expected: commit succeeds.
 
 ## Final Verification
 
-- [ ] **Step 1: Confirm branch and commits**
+- [x] **Step 1: Confirm branch and commits**
 
 Run:
 
@@ -273,12 +266,12 @@ Expected:
 - Working tree is clean.
 - Recent commits include the design spec commit and the two workflow documentation commits.
 
-- [ ] **Step 2: Confirm no contradictory merge ownership language remains**
+- [x] **Step 2: Confirm no contradictory merge ownership language remains**
 
 Run:
 
 ```bash
-rg -n "user owns review approval|do not merge PRs|fast-forward branches into `main`|Does not merge, push|Do not write fixes, push, or merge" docs AGENTS.md
+rg -n 'legacy user-owned merge approval|obsolete PR non-merge rule|obsolete read-only PR reviewer wording' docs AGENTS.md
 ```
 
 Expected:
