@@ -32,6 +32,8 @@ Never implement directly on `main`. Create an isolated branch or worktree for ea
 - 2026-05-17: Task 3, Add Local Supabase And Docker Setup, completed on branch `task-3-supabase-docker`.
 - 2026-05-17: Task 4, Create Database Schema And RLS Policies, completed on branch `task-4-database-schema`.
 - 2026-05-17: Current next task is Task 5, Add Supabase Clients And Auth Guard.
+- 2026-05-17: Task 5, Add Supabase Clients And Auth Guard, completed on branch `task-5-supabase-auth-guard`.
+- 2026-05-17: Current next task is Task 6, Implement Auth Pages And App Shell.
 
 ## Approved Spec
 
@@ -830,11 +832,12 @@ git commit -m "feat: add household database schema and RLS"
 - Create: `lib/supabase/server.ts`
 - Create: `lib/supabase/service.ts`
 - Create: `lib/supabase/middleware.ts`
-- Create: `middleware.ts`
+- Create: `proxy.ts`
 - Create: `lib/auth/require-user.ts`
 - Create: `lib/auth/household.ts`
+- Create: `tests/auth/supabase-auth.test.ts`
 
-- [ ] **Step 1: Add browser client**
+- [x] **Step 1: Add browser client**
 
 Create `lib/supabase/browser.ts`:
 
@@ -849,7 +852,7 @@ export function createClient() {
 }
 ```
 
-- [ ] **Step 2: Add server client**
+- [x] **Step 2: Add server client**
 
 Create `lib/supabase/server.ts`:
 
@@ -879,7 +882,7 @@ export async function createClient() {
 }
 ```
 
-- [ ] **Step 3: Add service-role client**
+- [x] **Step 3: Add service-role client**
 
 Create `lib/supabase/service.ts`:
 
@@ -904,7 +907,7 @@ export function createServiceClient() {
 }
 ```
 
-- [ ] **Step 4: Add middleware client**
+- [x] **Step 4: Add middleware client**
 
 Create `lib/supabase/middleware.ts`:
 
@@ -952,15 +955,15 @@ export async function updateSession(request: NextRequest) {
 }
 ```
 
-- [ ] **Step 5: Add root middleware**
+- [x] **Step 5: Add root proxy**
 
-Create `middleware.ts`:
+Create `proxy.ts`:
 
 ```ts
 import type { NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   return updateSession(request);
 }
 
@@ -969,7 +972,7 @@ export const config = {
 };
 ```
 
-- [ ] **Step 6: Add auth helpers**
+- [x] **Step 6: Add auth helpers**
 
 Create `lib/auth/require-user.ts`:
 
@@ -1022,23 +1025,24 @@ export async function requireHousehold(): Promise<HouseholdContext> {
 }
 ```
 
-- [ ] **Step 7: Verify**
+- [x] **Step 7: Verify**
 
 Run:
 
 ```bash
+npm run test -- tests/auth/supabase-auth.test.ts
 npm run typecheck
 npm run lint
 ```
 
-Expected: both pass.
+Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Run:
 
 ```bash
-git add lib middleware.ts
+git add lib proxy.ts tests/auth docs/superpowers/plans/2026-05-14-meal-planner-mvp.md
 git commit -m "feat: add Supabase auth clients and household guard"
 ```
 
