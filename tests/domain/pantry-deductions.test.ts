@@ -35,6 +35,28 @@ describe("buildDeductionPlan", () => {
     expect(result).toEqual([]);
   });
 
+  it("flags insufficient pantry stock for review", () => {
+    const result = buildDeductionPlan({
+      mealPlanEntryId: "meal-1",
+      existingDeductions: [],
+      ingredients: [{ id: "ri-1", itemName: "rice", quantity: 750, unit: "g" }],
+      pantry: [{ id: "p1", itemName: "rice", quantity: 0.5, unit: "kg" }],
+    });
+
+    expect(result).toEqual([
+      {
+        mealPlanEntryId: "meal-1",
+        recipeIngredientId: "ri-1",
+        pantryItemId: "p1",
+        itemName: "rice",
+        quantity: 0.75,
+        unit: "kg",
+        reviewRequired: true,
+        reviewReason: "Insufficient pantry stock",
+      },
+    ]);
+  });
+
   it("flags ambiguous conversions for review", () => {
     const result = buildDeductionPlan({
       mealPlanEntryId: "meal-1",

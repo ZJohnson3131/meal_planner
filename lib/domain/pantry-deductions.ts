@@ -87,6 +87,19 @@ export function buildDeductionPlan(input: {
         };
       }
 
+      if (converted.quantity > pantryItem.quantity) {
+        return {
+          mealPlanEntryId: input.mealPlanEntryId,
+          recipeIngredientId: ingredient.id,
+          pantryItemId: pantryItem.id,
+          itemName: normalizeName(ingredient.itemName),
+          quantity: converted.quantity,
+          unit: pantryItem.unit,
+          reviewRequired: true,
+          reviewReason: "Insufficient pantry stock",
+        };
+      }
+
       return {
         mealPlanEntryId: input.mealPlanEntryId,
         recipeIngredientId: ingredient.id,
