@@ -17,7 +17,7 @@ This directory defines the project-specific agents used to route work. The Lead 
 - [DevOps Engineer](devops-engineer.md): Docker, local Supabase, environment files, CI, audit, and setup docs.
 - [Product UX Reviewer](product-ux-reviewer.md): user-facing workflow, accessibility, clarity, and MVP acceptance-flow review.
 - [Code Reviewer](code-reviewer.md): static code-quality and correctness review after implementation.
-- [PR Review Agent](pr-review-agent.md): final pre-merge review against the active implementation-plan task.
+- [PR Review Agent](pr-review-agent.md): strict MVP PR gate for non-documentation task PRs; reviews, verifies, coordinates fixes, and squash-merges approved MVP PRs.
 
 ## Routing Rules
 
@@ -29,4 +29,4 @@ This directory defines the project-specific agents used to route work. The Lead 
 - Route deterministic pantry, ingredient, and shopping calculations to the Domain Logic Engineer.
 - Route recipe parsing and URL ingestion to the Recipe Ingestion Engineer.
 - Route tests to the Test Specialist, and do not let implementation agents silently patch tests to pass.
-- Route final pre-merge review to the PR Review Agent for non-documentation changes.
+- During MVP task mode, route every non-documentation task PR to the PR Review Agent before merge. The PR Review Agent must run verification independently, coordinate any fix loop, and squash-merge approved MVP PRs.
