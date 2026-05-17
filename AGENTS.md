@@ -9,7 +9,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Before selecting or starting the next task, read `docs/superpowers/plans/2026-05-14-meal-planner-mvp.md` and use the first incomplete task as the source of truth.
 - Keep the implementation plan updated as work progresses. Mark completed steps and tasks with checked boxes, and update the plan's progress log after each task is verified and committed.
 - Never implement directly on `main`. For every feature, fix, or workflow cleanup, create an isolated branch or worktree, complete and verify the work there, then open a PR.
-- The user owns PR review approval and merging. Do not merge PRs or fast-forward branches into `main` unless the user explicitly asks for that specific merge.
+- During MVP task mode, route every non-documentation task PR to the PR Review Agent. The PR Review Agent must review the PR, run required verification independently, coordinate fixes for blocking findings, and merge approved MVP task PRs with `gh pr merge --squash`. After a successful merge, sync local `main` from GitHub and leave the working tree on `main`.
+- MVP task mode lasts until every task in `docs/superpowers/plans/2026-05-14-meal-planner-mvp.md` is complete. After that, the PR Review Agent remains available but dormant unless the user explicitly invokes it. Post-MVP, the user owns UI testing, final implementation feedback, review approval, and merge decisions unless they explicitly delegate that authority again.
 - When opening a PR, include a concise summary of the changes, the current functionality, verification results, and any UI surfaces that need user testing.
 - Follow the plan's execution mode: complete one task at a time, run the listed verification commands, commit the task, then report the result before moving on.
 
