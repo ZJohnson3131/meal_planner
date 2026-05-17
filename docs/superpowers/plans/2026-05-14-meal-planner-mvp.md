@@ -41,6 +41,8 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: Current next task is Task 7, Implement Unit Conversion Domain Logic.
 - 2026-05-17: Task 7, Implement Unit Conversion Domain Logic, completed on branch `task-7-unit-conversion`.
 - 2026-05-17: Current next task is Task 8, Implement Ingredient Aggregation And Pantry Delta.
+- 2026-05-17: Task 8, Implement Ingredient Aggregation And Pantry Delta, completed on branch `task-8-ingredient-aggregation-pantry-delta`.
+- 2026-05-17: Current next task is Task 9, Implement Meal Completion Deduction Logic.
 
 ## Approved Spec
 
@@ -1351,7 +1353,7 @@ git commit -m "feat: add safe unit conversion rules"
 - Create: `lib/domain/ingredient-aggregation.ts`
 - Create: `lib/domain/pantry-delta.ts`
 
-- [ ] **Step 1: Write aggregation tests**
+- [x] **Step 1: Write aggregation tests**
 
 Create `tests/domain/ingredient-aggregation.test.ts`:
 
@@ -1375,7 +1377,7 @@ describe("aggregateIngredients", () => {
 });
 ```
 
-- [ ] **Step 2: Write pantry delta tests**
+- [x] **Step 2: Write pantry delta tests**
 
 Create `tests/domain/pantry-delta.test.ts`:
 
@@ -1419,7 +1421,7 @@ describe("calculatePantryDelta", () => {
 });
 ```
 
-- [ ] **Step 3: Run failing tests**
+- [x] **Step 3: Run failing tests**
 
 Run:
 
@@ -1429,7 +1431,7 @@ npm run test -- tests/domain/ingredient-aggregation.test.ts tests/domain/pantry-
 
 Expected: fail because implementation files do not exist.
 
-- [ ] **Step 4: Implement aggregation**
+- [x] **Step 4: Implement aggregation**
 
 Create `lib/domain/ingredient-aggregation.ts`:
 
@@ -1490,7 +1492,7 @@ export function aggregateIngredients(ingredients: IngredientInput[]): Aggregated
 }
 ```
 
-- [ ] **Step 5: Implement pantry delta**
+- [x] **Step 5: Implement pantry delta**
 
 Create `lib/domain/pantry-delta.ts`:
 
@@ -1595,7 +1597,7 @@ export function calculatePantryDelta(input: {
 }
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -1606,7 +1608,7 @@ npm run typecheck
 
 Expected: tests and typecheck pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
