@@ -46,6 +46,7 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: Task 9, Implement Meal Completion Deduction Logic, completed on branch `task-9-meal-completion-deductions`.
 - 2026-05-17: Current next task is Task 10, Implement Recipe Validation And Ingestion.
 - 2026-08-18: Task 10, Implement Recipe Validation And Ingestion, completed on branch `task-10-recipe-ingestion`; current next task is Task 11, Implement Recipe CRUD UI.
+- 2026-08-18: Task 11, Implement Recipe CRUD UI, completed on branch `task-11-recipe-crud-ui`; current next task is Task 12, Implement Pantry CRUD UI.
 
 ## Approved Spec
 
@@ -2108,7 +2109,7 @@ git commit -m "feat: parse recipes from structured webpage data"
 - Create: `app/(app)/recipes/new/page.tsx`
 - Create: `app/(app)/recipes/[id]/page.tsx`
 
-- [ ] **Step 1: Add recipe server actions**
+- [x] **Step 1: Add recipe server actions**
 
 Create `app/actions/recipes.ts` with actions:
 
@@ -2165,19 +2166,19 @@ export async function createRecipe(formData: FormData) {
 }
 ```
 
-- [ ] **Step 2: Add recipe form**
+- [x] **Step 2: Add recipe form**
 
 Create `components/forms/recipe-form.tsx` as a server-compatible form using `createRecipe`. Include fields for title, source URL, favorite, servings, instructions, and at least five ingredient rows.
 
-- [ ] **Step 3: Add URL ingest form**
+- [x] **Step 3: Add URL ingest form**
 
 Create `components/forms/url-ingest-form.tsx` as a client component. It posts to `/api/recipes/ingest`, then fills hidden/default form fields or displays extracted data for copy into the recipe form.
 
-- [ ] **Step 4: Add recipe list**
+- [x] **Step 4: Add recipe list**
 
 Create `components/recipes/recipe-list.tsx` that renders recipe title, favorite status, source link if present, and link to details.
 
-- [ ] **Step 5: Add recipe pages**
+- [x] **Step 5: Add recipe pages**
 
 Create:
 
@@ -2185,7 +2186,7 @@ Create:
 - `app/(app)/recipes/new/page.tsx`: renders URL ingest form and manual recipe form.
 - `app/(app)/recipes/[id]/page.tsx`: shows recipe details, ingredients, instructions, source URL.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -2196,7 +2197,7 @@ npm run lint
 
 Expected: both pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
