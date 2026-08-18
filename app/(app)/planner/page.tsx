@@ -44,7 +44,7 @@ export default async function PlannerPage({
   const weekStart = selectedWeekStart((await searchParams).weekStart);
   const weekEnd = addDays(weekStart, 6);
 
-  const [recipesResult, entriesResult] = await Promise.all([
+  const [recipesResult, dinnerSlotResult] = await Promise.all([
     supabase
       .from("recipes")
       .select("id, title, favorite")
@@ -52,15 +52,28 @@ export default async function PlannerPage({
       .order("favorite", { ascending: false })
       .order("title", { ascending: true }),
     supabase
-      .from("meal_plan_entries")
-      .select("id, planned_for, recipe_id, status, recipe:recipes(title)")
+      .from("meal_slots")
+      .select("id")
       .eq("household_id", householdId)
-      .gte("planned_for", weekStart)
-      .lte("planned_for", weekEnd)
-      .order("planned_for", { ascending: true }),
+      .eq("name", "Dinner")
+      .eq("is_default", true)
+      .maybeSingle(),
   ]);
 
-  if (recipesResult.error || entriesResult.error) {
+  if (recipesResult.error || dinnerSlotResult.error || !dinnerSlotResult.data) {
+    throw new Error("Failed to load the weekly dinner planner");
+  }
+
+  const entriesResult = await supabase
+    .from("meal_plan_entries")
+    .select("id, planned_for, recipe_id, status, recipe:recipes(title)")
+    .eq("household_id", householdId)
+    .eq("meal_slot_id", dinnerSlotResult.data.id)
+    .gte("planned_for", weekStart)
+    .lte("planned_for", weekEnd)
+    .order("planned_for", { ascending: true });
+
+  if (entriesResult.error) {
     throw new Error("Failed to load the weekly dinner planner");
   }
 
