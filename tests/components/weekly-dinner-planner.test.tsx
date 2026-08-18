@@ -3,8 +3,11 @@ import { describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/actions/meal-plans", () => ({
   assignDinner: vi.fn(),
+  completeMeal: vi.fn(),
+  getMealCompletionPreview: vi.fn(),
   markMealPlanned: vi.fn(),
   markMealSkipped: vi.fn(),
+  reverseCompletedMeal: vi.fn(),
 }));
 
 import { WeeklyDinnerPlanner } from "@/components/meal-planner/weekly-dinner-planner";
@@ -46,7 +49,21 @@ describe("WeeklyDinnerPlanner", () => {
     const monday = screen.getByRole("heading", { name: "Monday 15 June" }).closest("article")!;
     expect(within(monday).getByText("Completed")).toBeInTheDocument();
     expect(within(monday).getByLabelText("Recipe")).toBeDisabled();
-    expect(within(monday).getByText("This dinner is completed and cannot be changed here.")).toBeInTheDocument();
+    expect(within(monday).getByText("This dinner is completed. Reverse it before changing its recipe.")).toBeInTheDocument();
     expect(within(monday).queryByRole("button", { name: "Skip dinner" })).not.toBeInTheDocument();
+    expect(within(monday).getByRole("checkbox", { name: /i understand this restores/i })).not.toBeChecked();
+    expect(within(monday).getByRole("button", { name: "Reverse completion" })).toHaveAttribute("type", "submit");
+  });
+
+  test("shows a completion review trigger only for planned dinners", () => {
+    render(<WeeklyDinnerPlanner entries={[
+      { id: "entry-planned", planned_for: "2026-06-15", recipe_id: "recipe-1", status: "planned", recipe: { title: "Pasta" } },
+      { id: "entry-skipped", planned_for: "2026-06-16", recipe_id: "recipe-1", status: "skipped", recipe: { title: "Pasta" } },
+    ]} recipes={recipes} weekStart="2026-06-15" />);
+
+    const monday = screen.getByRole("heading", { name: "Monday 15 June" }).closest("article")!;
+    const tuesday = screen.getByRole("heading", { name: "Tuesday 16 June" }).closest("article")!;
+    expect(within(monday).getByRole("button", { name: "Complete dinner" })).toBeInTheDocument();
+    expect(within(tuesday).queryByRole("button", { name: "Complete dinner" })).not.toBeInTheDocument();
   });
 });
