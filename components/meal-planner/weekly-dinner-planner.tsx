@@ -7,7 +7,9 @@ import {
   assignDinner,
   markMealPlanned,
   markMealSkipped,
+  reverseCompletedMeal,
 } from "@/app/actions/meal-plans";
+import { CompletionDialog } from "@/components/meal-planner/completion-dialog";
 
 export type PlannerRecipe = {
   id: string;
@@ -117,6 +119,18 @@ async function submitPlanned(_previousState: ActionState, formData: FormData): P
   }
 }
 
+async function submitReverseCompleted(
+  _previousState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await reverseCompletedMeal(formData);
+    return initialActionState;
+  } catch {
+    return { error: "We could not reverse this completed dinner. Please try again." };
+  }
+}
+
 function StatusBadge({ status }: { status: PlannerMealEntry["status"] }) {
   const copy = {
     planned: "Planned",
@@ -136,6 +150,7 @@ function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: str
   const [assignState, assignAction] = useActionState(submitDinner, initialActionState);
   const [skipState, skipAction] = useActionState(submitSkipped, initialActionState);
   const [planState, planAction] = useActionState(submitPlanned, initialActionState);
+  const [reverseState, reverseAction] = useActionState(submitReverseCompleted, initialActionState);
   const selectId = `dinner-${day.isoDate}`;
   const status = entry?.status ?? "planned";
 
@@ -165,7 +180,7 @@ function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: str
             {recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.favorite ? "★ " : ""}{recipe.title}</option>)}
           </select>
         </div>
-        {entry?.status === "completed" ? <p className="text-sm text-slate-600">This dinner is completed and cannot be changed here.</p> : <SubmitButton pendingText="Saving…">{entry ? "Update dinner" : "Plan dinner"}</SubmitButton>}
+        {entry?.status === "completed" ? <p className="text-sm text-slate-600">This dinner is completed. Reverse it before changing its recipe.</p> : <SubmitButton pendingText="Saving…">{entry ? "Update dinner" : "Plan dinner"}</SubmitButton>}
         {assignState.error ? <p className="text-sm text-red-700" role="alert">{assignState.error}</p> : null}
       </form>
 
@@ -185,6 +200,24 @@ function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: str
             </form>
           )}
         </div>
+      ) : null}
+
+      {entry?.status === "planned" ? (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <CompletionDialog entryId={entry.id} recipeTitle={entry.recipe?.title ?? "this dinner"} />
+        </div>
+      ) : null}
+
+      {entry?.status === "completed" ? (
+        <form action={reverseAction} className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+          <input name="entryId" type="hidden" value={entry.id} />
+          <label className="flex items-start gap-2 text-sm text-slate-700">
+            <input className="mt-1 size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" name="confirmReversal" required type="checkbox" value="true" />
+            <span>I understand this restores the recorded pantry deductions where possible.</span>
+          </label>
+          <SubmitButton pendingText="Reversing…" tone="secondary">Reverse completion</SubmitButton>
+          {reverseState.error ? <p className="text-sm text-red-700" role="alert">{reverseState.error}</p> : null}
+        </form>
       ) : null}
     </article>
   );
