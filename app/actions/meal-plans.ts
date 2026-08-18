@@ -96,7 +96,13 @@ async function loadDeductionPlan(entry: DinnerMealEntry, householdId: string) {
     .filter((deduction) => deduction.status !== "reversed")
     .map((deduction) => ({ recipeIngredientId: deduction.recipe_ingredient_id }));
 
-  return buildDeductionPlan({
+  const pantry = (pantryResult.data ?? []).map((item) => ({
+    id: item.id,
+    itemName: item.item_name,
+    quantity: item.quantity,
+    unit: item.unit,
+  }));
+  const plan = buildDeductionPlan({
     mealPlanEntryId: entry.id,
     existingDeductions,
     ingredients: (ingredientsResult.data ?? []).map((ingredient) => ({
@@ -105,13 +111,55 @@ async function loadDeductionPlan(entry: DinnerMealEntry, householdId: string) {
       quantity: ingredient.quantity,
       unit: ingredient.unit,
     })),
-    pantry: (pantryResult.data ?? []).map((item) => ({
-      id: item.id,
-      itemName: item.item_name,
-      quantity: item.quantity,
-      unit: item.unit,
-    })),
+    pantry,
   });
+
+  // `buildDeductionPlan` evaluates a recipe line against a pantry item. A
+  // recipe can contain multiple lines that match the same pantry item, so
+  // reconcile those lines as a group before either previewing or applying
+  // them. Otherwise two individually-safe lines could overdraw one item.
+  const pantryQuantityById = new Map(pantry.map((item) => [item.id, item.quantity]));
+  const requestedByPantryItem = new Map<string, number>();
+  for (const item of plan) {
+    if (item.reviewRequired || !item.pantryItemId || item.quantity === null) continue;
+    requestedByPantryItem.set(
+      item.pantryItemId,
+      (requestedByPantryItem.get(item.pantryItemId) ?? 0) + item.quantity,
+    );
+  }
+
+  return plan.map((item) => {
+    if (item.reviewRequired || !item.pantryItemId || item.quantity === null) return item;
+    const available = pantryQuantityById.get(item.pantryItemId);
+    const requested = requestedByPantryItem.get(item.pantryItemId) ?? 0;
+    if (available === undefined || requested <= available) return item;
+
+    return {
+      ...item,
+      reviewRequired: true,
+      reviewReason: "Insufficient pantry stock",
+    };
+  });
+}
+
+function aggregatePreviewDeductions(items: DeductionPlanItem[]) {
+  const grouped = new Map<string, DeductionPlanItem>();
+  for (const item of items) {
+    // Clean deductions always have a matched pantry item and a converted
+    // quantity. Keep the fallback key defensive for future callers.
+    const key = item.pantryItemId ?? item.recipeIngredientId;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...item });
+      continue;
+    }
+
+    grouped.set(key, {
+      ...existing,
+      quantity: (existing.quantity ?? 0) + (item.quantity ?? 0),
+    });
+  }
+  return [...grouped.values()];
 }
 
 /**
@@ -135,7 +183,7 @@ export async function getMealCompletionPreview(entryId: string): Promise<{
 
   const plan = await loadDeductionPlan(entry, householdId);
   return {
-    clean: plan.filter((item) => !item.reviewRequired),
+    clean: aggregatePreviewDeductions(plan.filter((item) => !item.reviewRequired)),
     review: plan.filter((item) => item.reviewRequired),
   };
 }
@@ -263,7 +311,7 @@ export async function completeMeal(formData: FormData) {
   }
 
   const { householdId } = await requireHousehold();
-  const { supabase, dinnerSlotId, entry } = await getDinnerEntry(parsedEntryId.data, householdId);
+  const { supabase, entry } = await getDinnerEntry(parsedEntryId.data, householdId);
 
   if (entry.status === "completed") {
     return;
@@ -273,85 +321,18 @@ export async function completeMeal(formData: FormData) {
   }
 
   const plan = await loadDeductionPlan(entry, householdId);
-  const cleanDeductions = plan.filter(
-    (item) => !item.reviewRequired && item.pantryItemId !== null && item.quantity !== null,
-  );
-
-  // Multiple recipe lines can point to the same pantry item. Combine them
-  // before applying changes so quantity checks remain safe and deterministic.
-  const cleanTotals = new Map<string, number>();
-  for (const deduction of cleanDeductions) {
-    const pantryItemId = deduction.pantryItemId;
-    if (!pantryItemId) continue;
-    cleanTotals.set(pantryItemId, (cleanTotals.get(pantryItemId) ?? 0) + (deduction.quantity ?? 0));
-  }
-
-  if (cleanTotals.size > 0) {
-    const { data: pantryItems, error: pantryError } = await supabase
-      .from("pantry_items")
-      .select("id,quantity")
-      .eq("household_id", householdId)
-      .in("id", [...cleanTotals.keys()]);
-    if (pantryError || !pantryItems || pantryItems.length !== cleanTotals.size) {
-      throw new Error("Pantry stock changed before this meal could be completed");
-    }
-
-    // The equality filter is optimistic concurrency protection: a parallel
-    // pantry edit causes the action to fail rather than silently overwriting it.
-    for (const pantryItem of pantryItems) {
-      const quantityToDeduct = cleanTotals.get(pantryItem.id) ?? 0;
-      if (pantryItem.quantity < quantityToDeduct) {
-        throw new Error("Pantry stock changed before this meal could be completed");
-      }
-      const { data: updatedItem, error: updateError } = await supabase
-        .from("pantry_items")
-        .update({ quantity: pantryItem.quantity - quantityToDeduct })
-        .eq("id", pantryItem.id)
-        .eq("household_id", householdId)
-        .eq("quantity", pantryItem.quantity)
-        .select("id")
-        .maybeSingle();
-      if (updateError || !updatedItem) {
-        throw new Error("Pantry stock changed before this meal could be completed");
-      }
-    }
-  }
-
-  if (plan.length > 0) {
-    const { error: deductionError } = await supabase.from("pantry_deductions").upsert(
-      plan.map((item) => ({
-        household_id: householdId,
-        meal_plan_entry_id: entry.id,
-        pantry_item_id: item.pantryItemId,
-        recipe_ingredient_id: item.recipeIngredientId,
-        item_name: item.itemName,
-        // The database ledger requires values even for incomplete recipe data.
-        // A review row is never applied to pantry stock, and records zero plus
-        // "unknown" only when the source value itself is unavailable.
-        quantity: item.quantity ?? 0,
-        unit: item.unit ?? "unknown",
-        status: item.reviewRequired ? "review_required" : "applied",
-        reversed_at: null,
-      })),
-      { onConflict: "meal_plan_entry_id,recipe_ingredient_id" },
-    );
-    if (deductionError) {
-      throw new Error("Failed to record pantry deductions");
-    }
-  }
-
-  const { data: completedEntry, error: completionError } = await supabase
-    .from("meal_plan_entries")
-    .update({ status: "completed" })
-    .eq("id", entry.id)
-    .eq("household_id", householdId)
-    .eq("meal_slot_id", dinnerSlotId)
-    .eq("status", "planned")
-    .select("id")
-    .maybeSingle();
-  if (completionError || !completedEntry) {
-    throw new Error("Failed to mark meal completed");
-  }
+  const { error: completionError } = await supabase.rpc("apply_meal_completion_deductions", {
+    p_entry_id: entry.id,
+    p_deductions: plan.map((item) => ({
+      recipeIngredientId: item.recipeIngredientId,
+      pantryItemId: item.pantryItemId,
+      itemName: item.itemName,
+      quantity: item.quantity,
+      unit: item.unit,
+      status: item.reviewRequired ? "review_required" : "applied",
+    })),
+  });
+  if (completionError) throw new Error("Failed to mark meal completed");
 
   revalidatePath("/planner");
   revalidatePath("/pantry");
@@ -373,82 +354,15 @@ export async function reverseCompletedMeal(formData: FormData) {
   }
 
   const { householdId } = await requireHousehold();
-  const { supabase, dinnerSlotId, entry } = await getDinnerEntry(parsedInput.data.entryId, householdId);
+  const { supabase, entry } = await getDinnerEntry(parsedInput.data.entryId, householdId);
   if (entry.status !== "completed") {
     throw new Error("Only completed dinners can be reversed");
   }
 
-  const { data: deductions, error: deductionsError } = await supabase
-    .from("pantry_deductions")
-    .select("id,pantry_item_id,quantity,status")
-    .eq("household_id", householdId)
-    .eq("meal_plan_entry_id", entry.id)
-    .in("status", ["applied", "review_required"]);
-  if (deductionsError) {
-    throw new Error("Failed to load pantry deductions for reversal");
-  }
-
-  const appliedTotals = new Map<string, number>();
-  for (const deduction of deductions ?? []) {
-    if (deduction.status !== "applied" || !deduction.pantry_item_id) continue;
-    appliedTotals.set(
-      deduction.pantry_item_id,
-      (appliedTotals.get(deduction.pantry_item_id) ?? 0) + deduction.quantity,
-    );
-  }
-
-  if (appliedTotals.size > 0) {
-    const { data: pantryItems, error: pantryError } = await supabase
-      .from("pantry_items")
-      .select("id,quantity")
-      .eq("household_id", householdId)
-      .in("id", [...appliedTotals.keys()]);
-    if (pantryError) {
-      throw new Error("Failed to restore pantry stock");
-    }
-
-    // A deleted pantry item cannot be restored safely. Restore all remaining
-    // household-owned items from the exact quantities stored in the ledger.
-    for (const pantryItem of pantryItems ?? []) {
-      const { data: updatedItem, error: updateError } = await supabase
-        .from("pantry_items")
-        .update({ quantity: pantryItem.quantity + (appliedTotals.get(pantryItem.id) ?? 0) })
-        .eq("id", pantryItem.id)
-        .eq("household_id", householdId)
-        .eq("quantity", pantryItem.quantity)
-        .select("id")
-        .maybeSingle();
-      if (updateError || !updatedItem) {
-        throw new Error("Pantry stock changed before this meal could be reversed");
-      }
-    }
-  }
-
-  const deductionIds = (deductions ?? []).map((deduction) => deduction.id);
-  if (deductionIds.length > 0) {
-    const { error: reversalError } = await supabase
-      .from("pantry_deductions")
-      .update({ status: "reversed", reversed_at: new Date().toISOString() })
-      .eq("household_id", householdId)
-      .eq("meal_plan_entry_id", entry.id)
-      .in("id", deductionIds);
-    if (reversalError) {
-      throw new Error("Failed to record pantry deduction reversal");
-    }
-  }
-
-  const { data: restoredEntry, error: entryError } = await supabase
-    .from("meal_plan_entries")
-    .update({ status: "planned" })
-    .eq("id", entry.id)
-    .eq("household_id", householdId)
-    .eq("meal_slot_id", dinnerSlotId)
-    .eq("status", "completed")
-    .select("id")
-    .maybeSingle();
-  if (entryError || !restoredEntry) {
-    throw new Error("Failed to restore the meal to planned");
-  }
+  const { error: reversalError } = await supabase.rpc("reverse_meal_completion_deductions", {
+    p_entry_id: entry.id,
+  });
+  if (reversalError) throw new Error("Failed to restore the meal to planned");
 
   revalidatePath("/planner");
   revalidatePath("/pantry");

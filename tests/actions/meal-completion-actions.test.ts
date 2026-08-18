@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   buildDeductionPlan: vi.fn(),
   createClient: vi.fn(),
+  rpc: vi.fn(),
   revalidatePath: vi.fn(),
   requireHousehold: vi.fn(),
 }));
@@ -47,7 +48,10 @@ function dinnerClient(status: "planned" | "completed" | "skipped") {
     }),
   };
 
-  return { from: vi.fn((table: string) => table === "meal_slots" ? mealSlots : entries) };
+  return {
+    from: vi.fn((table: string) => table === "meal_slots" ? mealSlots : entries),
+    rpc: mocks.rpc,
+  };
 }
 
 function planClient() {
@@ -93,6 +97,69 @@ describe("meal completion actions", () => {
     await expect(completeMeal(entryFormData())).resolves.toBeUndefined();
     expect(mocks.buildDeductionPlan).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  test("sends every deduction to the atomic completion RPC", async () => {
+    mocks.buildDeductionPlan.mockReturnValue([
+      {
+        recipeIngredientId: "ingredient-1",
+        pantryItemId: "pantry-1",
+        itemName: "rice",
+        quantity: 100,
+        unit: "g",
+        reviewRequired: false,
+        reviewReason: null,
+      },
+      {
+        recipeIngredientId: "ingredient-2",
+        pantryItemId: null,
+        itemName: "oil",
+        quantity: null,
+        unit: null,
+        reviewRequired: true,
+        reviewReason: "No pantry match",
+      },
+    ]);
+    mocks.rpc.mockResolvedValue({ error: null });
+    mocks.createClient.mockResolvedValueOnce(dinnerClient("planned")).mockResolvedValueOnce(planClient());
+    const { completeMeal } = await import("@/app/actions/meal-plans");
+
+    await expect(completeMeal(entryFormData())).resolves.toBeUndefined();
+    expect(mocks.rpc).toHaveBeenCalledWith("apply_meal_completion_deductions", {
+      p_entry_id: entryId,
+      p_deductions: [
+        {
+          recipeIngredientId: "ingredient-1",
+          pantryItemId: "pantry-1",
+          itemName: "rice",
+          quantity: 100,
+          unit: "g",
+          status: "applied",
+        },
+        {
+          recipeIngredientId: "ingredient-2",
+          pantryItemId: null,
+          itemName: "oil",
+          quantity: null,
+          unit: null,
+          status: "review_required",
+        },
+      ],
+    });
+  });
+
+  test("aggregates matching pantry deductions in the completion preview", async () => {
+    mocks.buildDeductionPlan.mockReturnValue([
+      { recipeIngredientId: "ingredient-1", pantryItemId: "pantry-1", itemName: "Rice", quantity: 100, unit: "g", reviewRequired: false, reviewReason: null },
+      { recipeIngredientId: "ingredient-2", pantryItemId: "pantry-1", itemName: "Rice", quantity: 50, unit: "g", reviewRequired: false, reviewReason: null },
+    ]);
+    mocks.createClient.mockResolvedValueOnce(dinnerClient("planned")).mockResolvedValueOnce(planClient());
+    const { getMealCompletionPreview } = await import("@/app/actions/meal-plans");
+
+    await expect(getMealCompletionPreview(entryId)).resolves.toMatchObject({
+      clean: [{ pantryItemId: "pantry-1", quantity: 150, unit: "g" }],
+      review: [],
+    });
   });
 
   test("requires explicit confirmation before a completed dinner can be reversed", async () => {
