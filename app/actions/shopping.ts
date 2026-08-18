@@ -102,6 +102,12 @@ export async function generateShoppingList(formData: FormData) {
       unit: item.unit,
     })),
   });
+  // A pantry surplus (or an exact match) does not belong on a shopping list.
+  // Keep every review-required item, including items with an unknown delta, so
+  // the user can resolve ambiguous units or quantities manually.
+  const shoppingItems = deltas.filter(
+    (delta) => delta.reviewRequired || (delta.deltaQuantity !== null && delta.deltaQuantity > 0),
+  );
 
   const { data: shoppingList, error: shoppingListError } = await supabase
     .from("shopping_lists")
@@ -118,9 +124,9 @@ export async function generateShoppingList(formData: FormData) {
     throw new Error("Failed to create shopping list");
   }
 
-  if (deltas.length > 0) {
+  if (shoppingItems.length > 0) {
     const { error: itemsError } = await supabase.from("shopping_list_items").insert(
-      deltas.map((delta) => ({
+      shoppingItems.map((delta) => ({
         shopping_list_id: shoppingList.id,
         item_name: delta.itemName,
         required_quantity: delta.requiredQuantity,

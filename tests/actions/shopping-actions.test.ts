@@ -130,4 +130,23 @@ describe("shopping server actions", () => {
 
     expect(mocks.createClient).not.toHaveBeenCalled();
   });
+
+  test("does not persist a clean item when the pantry fully covers it", async () => {
+    mocks.mealLte.mockResolvedValue({ data: [{ recipe_id: "recipe-rice" }], error: null });
+    mocks.pantryEq.mockResolvedValue({
+      data: [{ id: "pantry-rice", item_name: "Rice", quantity: 1, unit: "kg" }],
+      error: null,
+    });
+    mocks.ingredientIn.mockResolvedValue({
+      data: [{ recipe_id: "recipe-rice", item_name: "Rice", quantity: 1, unit: "kg" }],
+      error: null,
+    });
+
+    const { generateShoppingList } = await import("@/app/actions/shopping");
+
+    await generateShoppingList(rangeFormData());
+
+    expect(mocks.shoppingListInsert).toHaveBeenCalledOnce();
+    expect(mocks.itemInsert).not.toHaveBeenCalled();
+  });
 });
