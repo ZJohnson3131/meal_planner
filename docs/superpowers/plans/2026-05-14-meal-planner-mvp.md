@@ -45,6 +45,7 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: Current next task is Task 9, Implement Meal Completion Deduction Logic.
 - 2026-05-17: Task 9, Implement Meal Completion Deduction Logic, completed on branch `task-9-meal-completion-deductions`.
 - 2026-05-17: Current next task is Task 10, Implement Recipe Validation And Ingestion.
+- 2026-08-18: Task 10, Implement Recipe Validation And Ingestion, completed on branch `task-10-recipe-ingestion`; current next task is Task 11, Implement Recipe CRUD UI.
 
 ## Approved Spec
 
@@ -1832,7 +1833,7 @@ git commit -m "feat: plan idempotent pantry deductions"
 - Create: `tests/integration/recipe-ingestion.test.ts`
 - Create: `app/api/recipes/ingest/route.ts`
 
-- [ ] **Step 1: Write ingestion tests**
+- [x] **Step 1: Write ingestion tests**
 
 Create `tests/integration/recipe-ingestion.test.ts`:
 
@@ -1880,7 +1881,7 @@ describe("parseRecipeHtml", () => {
 });
 ```
 
-- [ ] **Step 2: Implement recipe validation**
+- [x] **Step 2: Implement recipe validation**
 
 Create `lib/validation/recipes.ts`:
 
@@ -1905,7 +1906,7 @@ export const recipeSchema = z.object({
 });
 ```
 
-- [ ] **Step 3: Implement ingredient line parser**
+- [x] **Step 3: Implement ingredient line parser**
 
 Create `lib/recipes/parse-ingredient-line.ts`:
 
@@ -1947,7 +1948,7 @@ export function parseIngredientLine(line: string) {
 }
 ```
 
-- [ ] **Step 4: Implement recipe ingestion parser**
+- [x] **Step 4: Implement recipe ingestion parser**
 
 Create `lib/recipes/recipe-ingestion.ts`:
 
@@ -2038,7 +2039,7 @@ export function parseRecipeHtml(html: string, sourceUrl: string): ParsedRecipe {
 }
 ```
 
-- [ ] **Step 5: Add ingestion route**
+- [x] **Step 5: Add ingestion route**
 
 Create `app/api/recipes/ingest/route.ts`:
 
@@ -2075,7 +2076,7 @@ export async function POST(request: Request) {
 }
 ```
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -2086,7 +2087,7 @@ npm run typecheck
 
 Expected: tests and typecheck pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
