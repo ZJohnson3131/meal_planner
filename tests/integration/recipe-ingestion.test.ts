@@ -95,4 +95,26 @@ describe("validateRecipeUrl", () => {
   ])("rejects %s (%s)", async (url) => {
     await expect(validateRecipeUrl(url)).rejects.toBeInstanceOf(RecipeFetchError);
   });
+
+  it.each([
+    ["ff02::1", "multicast"],
+    ["fe80::1", "link-local"],
+    ["::1", "loopback"],
+    ["fd00::1", "unique-local"],
+    ["2001:0db8::1", "documentation"],
+    ["::ffff:192.0.2.1", "IPv4-mapped"],
+  ])("rejects a hostname with an unsafe %s AAAA record (%s)", async (address) => {
+    const lookupMock = vi.fn().mockResolvedValue([{ address, family: 6 }]);
+
+    await expect(validateRecipeUrl("https://recipes.example/recipe", lookupMock)).rejects.toBeInstanceOf(RecipeFetchError);
+    expect(lookupMock).toHaveBeenCalledWith("recipes.example", { all: true, verbatim: true });
+  });
+
+  it("accepts a hostname that resolves only to a global-unicast AAAA record", async () => {
+    const lookupMock = vi.fn().mockResolvedValue([{ address: "2606:4700:4700::1111", family: 6 }]);
+
+    await expect(validateRecipeUrl("https://recipes.example/recipe", lookupMock)).resolves.toMatchObject({
+      address: { address: "2606:4700:4700::1111", family: 6 },
+    });
+  });
 });

@@ -40,27 +40,32 @@ function isPublicIpv4(address: string): boolean {
 
 function isPublicIpv6(address: string): boolean {
   const normalized = address.toLowerCase();
-  if (
-    normalized === "::" ||
-    normalized === "::1" ||
-    normalized.startsWith("::ffff:") ||
-    normalized.startsWith("fe80:") ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("2001:db8:")
-  ) {
+  if (isIP(normalized) !== 6 || normalized.includes(".")) {
     return false;
   }
 
-  const mappedIpv4 = normalized.match(/(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
-  return mappedIpv4 ? isPublicIpv4(mappedIpv4) : true;
+  // Accept only 2000::/3, the globally-routable IPv6 unicast range. This
+  // intentionally excludes unspecified, loopback, IPv4-mapped, link-local,
+  // unique-local, and multicast addresses without relying on their textual
+  // representation (which can be compressed in multiple ways).
+  const firstHextet = Number.parseInt(normalized.slice(0, normalized.indexOf(":")), 16);
+  if (!Number.isInteger(firstHextet) || firstHextet < 0x2000 || firstHextet > 0x3fff) {
+    return false;
+  }
+
+  // RFC 3849 reserves 2001:db8::/32 for documentation. Leading zeroes in
+  // the second hextet are permitted, so do not rely on one canonical form.
+  return !/^2001:0{0,3}db8(?::|$)/.test(normalized);
 }
 
 function isPublicAddress(address: string, family: number): boolean {
   return family === 4 ? isPublicIpv4(address) : family === 6 && isPublicIpv6(address);
 }
 
-export async function validateRecipeUrl(rawUrl: string): Promise<{ url: URL; address: ResolvedAddress }> {
+export async function validateRecipeUrl(
+  rawUrl: string,
+  resolveDns: typeof lookup = lookup,
+): Promise<{ url: URL; address: ResolvedAddress }> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -79,10 +84,11 @@ export async function validateRecipeUrl(rawUrl: string): Promise<{ url: URL; add
     throw new RecipeFetchError("Unsupported recipe URL");
   }
 
-  const literalFamily = isIP(url.hostname);
+  const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  const literalFamily = isIP(hostname);
   const resolvedAddresses = literalFamily
-    ? [{ address: url.hostname, family: literalFamily as 4 | 6 }]
-    : await lookup(url.hostname, { all: true, verbatim: true });
+    ? [{ address: hostname, family: literalFamily as 4 | 6 }]
+    : await resolveDns(hostname, { all: true, verbatim: true });
   const addresses = resolvedAddresses.filter(
     (candidate): candidate is ResolvedAddress => candidate.family === 4 || candidate.family === 6,
   );
