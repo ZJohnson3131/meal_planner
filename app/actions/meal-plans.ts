@@ -327,8 +327,11 @@ export async function completeMeal(formData: FormData) {
       recipeIngredientId: item.recipeIngredientId,
       pantryItemId: item.pantryItemId,
       itemName: item.itemName,
-      quantity: item.quantity,
-      unit: item.unit,
+      // The ledger is deliberately complete, including items that cannot be
+      // safely deducted. Preserve that review record with explicit sentinel
+      // values when the source recipe omitted a quantity or unit.
+      quantity: item.quantity ?? 0,
+      unit: item.unit ?? "unknown",
       status: item.reviewRequired ? "review_required" : "applied",
     })),
   });

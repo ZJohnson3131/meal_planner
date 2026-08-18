@@ -140,8 +140,8 @@ describe("meal completion actions", () => {
           recipeIngredientId: "ingredient-2",
           pantryItemId: null,
           itemName: "oil",
-          quantity: null,
-          unit: null,
+          quantity: 0,
+          unit: "unknown",
           status: "review_required",
         },
       ],
@@ -159,6 +159,19 @@ describe("meal completion actions", () => {
     await expect(getMealCompletionPreview(entryId)).resolves.toMatchObject({
       clean: [{ pantryItemId: "pantry-1", quantity: 150, unit: "g" }],
       review: [],
+    });
+  });
+
+  test("reverses a completed dinner through the atomic reversal RPC", async () => {
+    mocks.rpc.mockResolvedValue({ error: null });
+    mocks.createClient.mockResolvedValue(dinnerClient("completed"));
+    const { reverseCompletedMeal } = await import("@/app/actions/meal-plans");
+
+    await expect(
+      reverseCompletedMeal(entryFormData({ confirmReversal: "true" })),
+    ).resolves.toBeUndefined();
+    expect(mocks.rpc).toHaveBeenCalledWith("reverse_meal_completion_deductions", {
+      p_entry_id: entryId,
     });
   });
 
