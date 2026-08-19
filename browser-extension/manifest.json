@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Meal Planner Recipe Draft",
+  "version": "0.1.0",
+  "description": "Sends a bounded recipe draft from the current page to the local Meal Planner review screen.",
+  "permissions": ["activeTab", "scripting"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "Import recipe into Meal Planner"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "meal-planner-recipe-draft@example.local"
+    }
+  }
+}
