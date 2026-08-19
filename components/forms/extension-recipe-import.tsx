@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { RecipeForm } from "@/components/forms/recipe-form";
 import { RECIPE_INGESTED_EVENT, type RecipeIngestedData } from "@/components/forms/url-ingest-form";
@@ -53,22 +53,20 @@ function decodeDraft(hash: string): RecipeIngestedData | null {
   }
 }
 
-function readInitialFragment(): { hasFragment: boolean; draft: RecipeIngestedData | null } {
-  if (typeof window === "undefined") return { hasFragment: false, draft: null };
-  const hash = window.location.hash;
-  return { hasFragment: Boolean(hash), draft: hash ? decodeDraft(hash) : null };
-}
-
 /** Reviews a bounded extension-provided draft after removing it from the URL. */
 export function ExtensionRecipeImport() {
-  const [{ hasFragment, draft }] = useState(readInitialFragment);
-  const error = hasFragment && !draft ? "The browser extension draft was missing or invalid. Please try importing again." : null;
+  // Keep the server and hydration render identical. Once hydration completes,
+  // capture the fragment exactly once so clearing it cannot remove the form.
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const fragment = useMemo(() => (hydrated ? window.location.hash : ""), [hydrated]);
+  const draft = useMemo(() => (fragment ? decodeDraft(fragment) : null), [fragment]);
+  const error = fragment && !draft ? "The browser extension draft was missing or invalid. Please try importing again." : null;
 
   useEffect(() => {
-    if (!hasFragment) return;
+    if (!fragment) return;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     if (draft) window.dispatchEvent(new CustomEvent<RecipeIngestedData>(RECIPE_INGESTED_EVENT, { detail: draft }));
-  }, [draft, hasFragment]);
+  }, [draft, fragment]);
 
   return (
     <div className="space-y-6">
