@@ -2,7 +2,7 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0f172a;
 }
 
 @theme inline {
@@ -12,15 +12,96 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f172a;
+    --foreground: #f8fafc;
+    color-scheme: dark;
+
+    /* Keep the existing slate utility classes legible on dark surfaces. */
+    --color-slate-50: #0f172a;
+    --color-slate-100: #1e293b;
+    --color-slate-200: #334155;
+    --color-slate-300: #475569;
+    --color-slate-400: #94a3b8;
+    --color-slate-500: #cbd5e1;
+    --color-slate-600: #cbd5e1;
+    --color-slate-700: #e2e8f0;
+    --color-slate-800: #f1f5f9;
+    --color-slate-900: #f8fafc;
+    --color-slate-950: #ffffff;
+
+    /* Preserve contrast for the existing warning and error panels. */
+    --color-amber-50: #451a03;
+    --color-amber-100: #78350f;
+    --color-amber-200: #b45309;
+    --color-amber-300: #d97706;
+    --color-amber-400: #f59e0b;
+    --color-amber-500: #fbbf24;
+    --color-amber-600: #facc15;
+    --color-amber-700: #fde68a;
+    --color-amber-800: #fef3c7;
+    --color-amber-900: #fff7ed;
+    --color-amber-950: #ffffff;
+
+    --color-red-50: #450a0a;
+    --color-red-100: #7f1d1d;
+    --color-red-200: #b91c1c;
+    --color-red-300: #dc2626;
+    --color-red-400: #ef4444;
+    --color-red-500: #f87171;
+    --color-red-600: #fca5a5;
+    --color-red-700: #fecaca;
+    --color-red-800: #fee2e2;
+    --color-red-900: #fef2f2;
+    --color-red-950: #ffffff;
+  }
+
+  /* `text-white` remains white for dark primary buttons; only white surfaces change. */
+  [class~="bg-white"],
+  input,
+  textarea,
+  select,
+  dialog {
+    background-color: #1e293b;
+    color: #f8fafc;
+  }
+
+  [class~="text-emerald-700"] {
+    color: #6ee7b7;
+  }
+
+  [class~="text-emerald-800"] {
+    color: #a7f3d0;
+  }
+
+  [class~="text-emerald-900"] {
+    color: #d1fae5;
+  }
+
+  [class~="bg-emerald-100"] {
+    background-color: #064e3b;
+  }
+
+  [class~="bg-sky-100"] {
+    background-color: #0c4a6e;
+  }
+
+  [class~="text-sky-900"] {
+    color: #e0f2fe;
+  }
+
+  [class~="border-emerald-700"] {
+    border-color: #34d399;
+  }
+
+  dialog::backdrop {
+    background-color: rgb(2 6 23 / 0.65);
+  }
 }
