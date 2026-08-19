@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { createRecipe } from "@/app/actions/recipes";
@@ -39,10 +39,6 @@ function SubmitButton() {
 
 /** A fully editable recipe form for manual entry and reviewed URL imports. */
 export function RecipeForm() {
-  const [, formAction, isPending] = useActionState(async (_state: null, formData: FormData) => {
-    await createRecipe(formData);
-    return null;
-  }, null);
   const [title, setTitle] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [servings, setServings] = useState("");
@@ -92,7 +88,7 @@ export function RecipeForm() {
   }
 
   return (
-    <form action={formAction} className="space-y-6" noValidate>
+    <form action={createRecipe} className="space-y-6" noValidate>
       <input name="ingestionStatus" type="hidden" value={ingestionStatus} />
       <fieldset className="space-y-4">
         <legend className="text-lg font-semibold text-slate-950">Recipe details</legend>
@@ -147,7 +143,6 @@ export function RecipeForm() {
         <button className="rounded-md border border-emerald-700 px-3 py-2 text-sm font-medium text-emerald-800" onClick={addIngredient} type="button">Add ingredient</button>
       </fieldset>
 
-      {isPending ? <p aria-live="polite" className="text-sm text-slate-600">Saving your recipe…</p> : null}
       <SubmitButton />
     </form>
   );

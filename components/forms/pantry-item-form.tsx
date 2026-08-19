@@ -2,27 +2,11 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 
-import { createPantryItem } from "@/app/actions/pantry";
+import { createPantryItem, type PantryItemFormState } from "@/app/actions/pantry";
 
-type PantryFormState = {
-  error: string | null;
-  success: boolean;
-};
-
-const initialState: PantryFormState = { error: null, success: false };
-
-async function submitPantryItem(
-  _previousState: PantryFormState,
-  formData: FormData,
-): Promise<PantryFormState> {
-  try {
-    await createPantryItem(formData);
-    return { error: null, success: true };
-  } catch {
-    return { error: "We could not add this pantry item. Check the details and try again.", success: false };
-  }
-}
+const initialState: PantryItemFormState = { error: null, success: false };
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -41,13 +25,15 @@ function SubmitButton() {
 /** Collects a new household pantry item using the pantry server action. */
 export function PantryItemForm() {
   const formRef = useRef<HTMLFormElement>(null);
-  const [state, formAction] = useActionState(submitPantryItem, initialState);
+  const router = useRouter();
+  const [state, formAction] = useActionState(createPantryItem, initialState);
 
   useEffect(() => {
     if (state.success) {
       formRef.current?.reset();
+      router.refresh();
     }
-  }, [state.success]);
+  }, [router, state.success]);
 
   return (
     <form action={formAction} className="space-y-4 rounded-lg border border-slate-200 bg-white p-5" ref={formRef}>

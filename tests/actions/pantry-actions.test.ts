@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   deleteEqHousehold: vi.fn(),
   deleteEqId: vi.fn(),
   deleteMaybeSingle: vi.fn(),
+  existingEq: vi.fn(),
+  existingIs: vi.fn(),
+  existingLimit: vi.fn(),
+  existingQuery: {},
   insert: vi.fn(),
   revalidatePath: vi.fn(),
   requireHousehold: vi.fn(),
@@ -44,8 +48,20 @@ function pantryFormData(overrides: Record<string, string> = {}) {
 describe("pantry server actions", () => {
   beforeEach(() => {
     vi.resetModules();
-    Object.values(mocks).forEach((mock) => mock.mockReset());
+    Object.values(mocks).forEach((mock) => {
+      if ("mockReset" in mock && typeof mock.mockReset === "function") {
+        mock.mockReset();
+      }
+    });
     mocks.requireHousehold.mockResolvedValue({ householdId: "household-123" });
+    Object.assign(mocks.existingQuery, {
+      eq: mocks.existingEq,
+      is: mocks.existingIs,
+      limit: mocks.existingLimit,
+    });
+    mocks.existingEq.mockReturnValue(mocks.existingQuery);
+    mocks.existingIs.mockReturnValue(mocks.existingQuery);
+    mocks.existingLimit.mockResolvedValue({ data: [], error: null });
     mocks.insert.mockResolvedValue({ error: null });
     mocks.updateMaybeSingle.mockResolvedValue({ data: { id: pantryItemId }, error: null });
     mocks.updateSelect.mockReturnValue({ maybeSingle: mocks.updateMaybeSingle });
@@ -59,7 +75,12 @@ describe("pantry server actions", () => {
     mocks.createClient.mockResolvedValue({
       from: vi.fn((table: string) => {
         if (table !== "pantry_items") throw new Error(`Unexpected table: ${table}`);
-        return { insert: mocks.insert, update: mocks.update, delete: mocks.delete };
+        return {
+          select: vi.fn(() => mocks.existingQuery),
+          insert: mocks.insert,
+          update: mocks.update,
+          delete: mocks.delete,
+        };
       }),
     });
   });
@@ -88,6 +109,17 @@ describe("pantry server actions", () => {
     );
 
     expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  test("treats an identical active-household item as an idempotent replay", async () => {
+    mocks.existingLimit.mockResolvedValue({ data: [{ id: pantryItemId }], error: null });
+    const { createPantryItem } = await import("@/app/actions/pantry");
+
+    await createPantryItem(pantryFormData());
+
+    expect(mocks.existingEq).toHaveBeenCalledWith("household_id", "household-123");
+    expect(mocks.insert).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 

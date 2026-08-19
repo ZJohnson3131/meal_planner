@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
 import {
@@ -30,10 +29,6 @@ type WeeklyDinnerPlannerProps = {
   recipes: PlannerRecipe[];
   weekStart: string;
 };
-
-type ActionState = { error: string | null };
-
-const initialActionState: ActionState = { error: null };
 
 function dateFromIso(isoDate: string) {
   const [year, month, day] = isoDate.split("-").map(Number);
@@ -92,45 +87,6 @@ function SubmitButton({ children, pendingText, tone = "primary" }: { children: s
   );
 }
 
-async function submitDinner(_previousState: ActionState, formData: FormData): Promise<ActionState> {
-  try {
-    await assignDinner(formData);
-    return initialActionState;
-  } catch {
-    return { error: "We could not save this dinner. Please try again." };
-  }
-}
-
-async function submitSkipped(_previousState: ActionState, formData: FormData): Promise<ActionState> {
-  try {
-    await markMealSkipped(formData);
-    return initialActionState;
-  } catch {
-    return { error: "We could not skip this dinner. Please try again." };
-  }
-}
-
-async function submitPlanned(_previousState: ActionState, formData: FormData): Promise<ActionState> {
-  try {
-    await markMealPlanned(formData);
-    return initialActionState;
-  } catch {
-    return { error: "We could not restore this dinner. Please try again." };
-  }
-}
-
-async function submitReverseCompleted(
-  _previousState: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  try {
-    await reverseCompletedMeal(formData);
-    return initialActionState;
-  } catch {
-    return { error: "We could not reverse this completed dinner. Please try again." };
-  }
-}
-
 function StatusBadge({ status }: { status: PlannerMealEntry["status"] }) {
   const copy = {
     planned: "Planned",
@@ -147,10 +103,6 @@ function StatusBadge({ status }: { status: PlannerMealEntry["status"] }) {
 }
 
 function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: string }; entry: PlannerMealEntry | undefined; recipes: PlannerRecipe[] }) {
-  const [assignState, assignAction] = useActionState(submitDinner, initialActionState);
-  const [skipState, skipAction] = useActionState(submitSkipped, initialActionState);
-  const [planState, planAction] = useActionState(submitPlanned, initialActionState);
-  const [reverseState, reverseAction] = useActionState(submitReverseCompleted, initialActionState);
   const selectId = `dinner-${day.isoDate}`;
   const status = entry?.status ?? "planned";
 
@@ -164,7 +116,7 @@ function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: str
         {entry ? <StatusBadge status={entry.status} /> : <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">Unplanned</span>}
       </div>
 
-      <form action={assignAction} className="mt-4 space-y-3">
+      <form action={assignDinner} className="mt-4 space-y-3">
         <input name="plannedFor" type="hidden" value={day.isoDate} />
         <div>
           <label className="block text-sm font-medium text-slate-800" htmlFor={selectId}>Recipe</label>
@@ -181,22 +133,19 @@ function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: str
           </select>
         </div>
         {entry?.status === "completed" ? <p className="text-sm text-slate-600">This dinner is completed. Reverse it before changing its recipe.</p> : <SubmitButton pendingText="Saving…">{entry ? "Update dinner" : "Plan dinner"}</SubmitButton>}
-        {assignState.error ? <p className="text-sm text-red-700" role="alert">{assignState.error}</p> : null}
       </form>
 
       {entry && entry.status !== "completed" ? (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
           {entry.status === "skipped" ? (
-            <form action={planAction}>
+            <form action={markMealPlanned}>
               <input name="entryId" type="hidden" value={entry.id} />
               <SubmitButton pendingText="Restoring…" tone="secondary">Restore to planned</SubmitButton>
-              {planState.error ? <p className="mt-2 text-sm text-red-700" role="alert">{planState.error}</p> : null}
             </form>
           ) : (
-            <form action={skipAction}>
+            <form action={markMealSkipped}>
               <input name="entryId" type="hidden" value={entry.id} />
               <SubmitButton pendingText="Skipping…" tone="danger">Skip dinner</SubmitButton>
-              {skipState.error ? <p className="mt-2 text-sm text-red-700" role="alert">{skipState.error}</p> : null}
             </form>
           )}
         </div>
@@ -209,14 +158,13 @@ function DinnerDay({ day, entry, recipes }: { day: { isoDate: string; label: str
       ) : null}
 
       {entry?.status === "completed" ? (
-        <form action={reverseAction} className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+        <form action={reverseCompletedMeal} className="mt-3 space-y-3 border-t border-slate-100 pt-3">
           <input name="entryId" type="hidden" value={entry.id} />
           <label className="flex items-start gap-2 text-sm text-slate-700">
             <input className="mt-1 size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" name="confirmReversal" required type="checkbox" value="true" />
             <span>I understand this restores the recorded pantry deductions where possible.</span>
           </label>
           <SubmitButton pendingText="Reversing…" tone="secondary">Reverse completion</SubmitButton>
-          {reverseState.error ? <p className="text-sm text-red-700" role="alert">{reverseState.error}</p> : null}
         </form>
       ) : null}
     </article>

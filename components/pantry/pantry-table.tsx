@@ -1,6 +1,5 @@
 "use client";
 
-import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { deletePantryItem, updatePantryItem } from "@/app/actions/pantry";
@@ -17,27 +16,6 @@ export type PantryTableItem = {
 type PantryTableProps = {
   items: PantryTableItem[];
 };
-
-type RowState = { error: string | null };
-const rowInitialState: RowState = { error: null };
-
-async function submitUpdate(_previousState: RowState, formData: FormData): Promise<RowState> {
-  try {
-    await updatePantryItem(formData);
-    return rowInitialState;
-  } catch {
-    return { error: "We could not save this pantry item. Try again." };
-  }
-}
-
-async function submitDelete(_previousState: RowState, formData: FormData): Promise<RowState> {
-  try {
-    await deletePantryItem(formData);
-    return rowInitialState;
-  } catch {
-    return { error: "We could not delete this pantry item. Try again." };
-  }
-}
 
 function SaveButton() {
   const { pending } = useFormStatus();
@@ -58,9 +36,6 @@ function DeleteButton({ itemName }: { itemName: string }) {
 }
 
 function PantryRow({ item }: { item: PantryTableItem }) {
-  const [updateState, updateAction] = useActionState(submitUpdate, rowInitialState);
-  const [deleteState, deleteAction] = useActionState(submitDelete, rowInitialState);
-
   return (
     <tr className="border-b border-slate-200 last:border-0">
       <td className="p-3 align-top">
@@ -80,17 +55,15 @@ function PantryRow({ item }: { item: PantryTableItem }) {
       </td>
       <td className="p-3 align-top">
         <div className="flex flex-wrap gap-2">
-          <form action={updateAction} id={`pantry-update-${item.id}`}>
+          <form action={updatePantryItem} id={`pantry-update-${item.id}`}>
             <input name="id" type="hidden" value={item.id} />
             <SaveButton />
           </form>
-          <form action={deleteAction} onSubmit={(event) => { if (!window.confirm(`Delete ${item.item_name} from the pantry?`)) event.preventDefault(); }}>
+          <form action={deletePantryItem} onSubmit={(event) => { if (!window.confirm(`Delete ${item.item_name} from the pantry?`)) event.preventDefault(); }}>
             <input name="id" type="hidden" value={item.id} />
             <DeleteButton itemName={item.item_name} />
           </form>
         </div>
-        {updateState.error ? <p className="mt-2 text-sm text-red-700" role="alert">{updateState.error}</p> : null}
-        {deleteState.error ? <p className="mt-2 text-sm text-red-700" role="alert">{deleteState.error}</p> : null}
       </td>
     </tr>
   );
