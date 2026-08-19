@@ -92,21 +92,24 @@ function sectionListText(
   // Recipe sites commonly place the list directly after its heading. Looking
   // only in the heading's nearby structure avoids treating navigation/footer
   // lists as recipe content.
-  const siblingList = heading.nextAll().toArray().find((sibling) => {
-    const tagName = sibling.tagName?.toLowerCase();
-    return !tagName?.match(/^h[1-6]$/);
-  });
-  const list = siblingList && $(siblingList).is("ul, ol")
-    ? $(siblingList)
-    : siblingList
-      ? $(siblingList).children("ul, ol").first()
-      : heading.parent().children("ul, ol").first();
+  let list = $();
+  for (const sibling of heading.nextAll().toArray()) {
+    const siblingNode = $(sibling);
+    if (sibling.tagName?.match(/^h[1-6]$/i)) break;
+    list = siblingNode.is("ul, ol") ? siblingNode : siblingNode.find("ul, ol").first();
+    if (list.length > 0) break;
+  }
+
+  // Some component libraries wrap the list one or more levels below a sibling
+  // container (heading > div > ul). The heading's parent is still a bounded
+  // recipe section, so consider its first list only after the direct scan.
+  if (list.length === 0) list = heading.parent().find("ul, ol").first();
 
   return list
     .find("li")
     .toArray()
     .slice(0, MAX_INGREDIENTS)
-    .map((item) => plainText($(item).text(), 2_000))
+    .map((item) => plainText($(item).text(), 2_000).replace(/^step\s+\d+\s*/i, ""))
     .filter(Boolean);
 }
 

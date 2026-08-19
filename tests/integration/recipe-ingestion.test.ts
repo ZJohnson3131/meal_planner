@@ -65,11 +65,11 @@ describe("parseRecipeHtml", () => {
       <html><head><title>Spinach Pesto Gnocchi | Coles</title></head><body>
         <main><article>
           <h1>Spinach Pesto Gnocchi</h1>
-          <p class="recipe-servings">Serves: 4</p>
+          <div><span>Serves</span><span>4</span></div>
           <h2>Ingredients</h2>
-          <ul><li>500 g gnocchi</li><li>120 g baby spinach</li><li>1 can cannellini beans</li></ul>
+          <div><h3></h3><ul><li>500 g gnocchi</li><li>120 g baby spinach</li><li>1 can cannellini beans</li></ul></div>
           <h2>Method</h2>
-          <ol><li>Cook the gnocchi.</li><li>Blend spinach into pesto and serve.</li></ol>
+          <div><ol><li><h3>Step 1</h3><p>Cook the gnocchi.</p></li><li><h3>Step 2</h3><p>Blend spinach into pesto and serve.</p></li></ol></div>
         </article>
       </body></html>`;
 
