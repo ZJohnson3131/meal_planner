@@ -7,6 +7,10 @@ vi.mock("@/app/actions/pantry", () => ({
   updatePantryItem: vi.fn(),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+
 import { PantryItemForm } from "@/components/forms/pantry-item-form";
 import { PantryTable } from "@/components/pantry/pantry-table";
 

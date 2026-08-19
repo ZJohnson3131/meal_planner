@@ -47,6 +47,9 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-05-17: Current next task is Task 10, Implement Recipe Validation And Ingestion.
 - 2026-08-18: Task 10, Implement Recipe Validation And Ingestion, completed on branch `task-10-recipe-ingestion`; current next task is Task 11, Implement Recipe CRUD UI.
 - 2026-08-18: Task 11, Implement Recipe CRUD UI, completed on branch `task-11-recipe-crud-ui`; current next task is Task 12, Implement Pantry CRUD UI.
+- 2026-08-18: Tasks 12–15 (Pantry CRUD, dinner planner, shopping lists, and atomic meal completion) completed and merged through the MVP PR workflow.
+- 2026-08-19: Task 16 live verification completed locally: RLS integration, atomic-RPC schema lint, full Vitest suite, and Desktop Chrome plus Mobile Safari production E2E flows pass; pending PR review.
+- 2026-08-19: Task 17 local-development and security documentation completed; production build and Docker image verification pass; pending final MVP PR review.
 
 ## Approved Spec
 
@@ -2216,7 +2219,7 @@ git commit -m "feat: add recipe capture and library UI"
 - Create: `components/pantry/pantry-table.tsx`
 - Create: `app/(app)/pantry/page.tsx`
 
-- [ ] **Step 1: Add pantry validation**
+- [x] **Step 1: Add pantry validation**
 
 Create `lib/validation/pantry.ts`:
 
@@ -2232,23 +2235,23 @@ export const pantryItemSchema = z.object({
 });
 ```
 
-- [ ] **Step 2: Add pantry actions**
+- [x] **Step 2: Add pantry actions**
 
 Create `app/actions/pantry.ts` with `createPantryItem`, `updatePantryItem`, and `deletePantryItem`. Each action must call `requireHousehold()`, include `household_id` in filters or inserts, and revalidate `/pantry`.
 
-- [ ] **Step 3: Add pantry form**
+- [x] **Step 3: Add pantry form**
 
 Create `components/forms/pantry-item-form.tsx` with item name, quantity, unit, category, and expiry date fields.
 
-- [ ] **Step 4: Add pantry table**
+- [x] **Step 4: Add pantry table**
 
 Create `components/pantry/pantry-table.tsx` with item name, quantity, unit, category, expiry date, and delete action.
 
-- [ ] **Step 5: Add pantry page**
+- [x] **Step 5: Add pantry page**
 
 Create `app/(app)/pantry/page.tsx` that loads pantry items for the current household and renders the form plus table.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run:
 
@@ -2259,7 +2262,7 @@ npm run lint
 
 Expected: both pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
@@ -2276,7 +2279,7 @@ git commit -m "feat: add pantry inventory management"
 - Create: `components/meal-planner/weekly-dinner-planner.tsx`
 - Create: `app/(app)/planner/page.tsx`
 
-- [ ] **Step 1: Add meal plan actions**
+- [x] **Step 1: Add meal plan actions**
 
 Create `app/actions/meal-plans.ts` with:
 
@@ -2286,15 +2289,15 @@ Create `app/actions/meal-plans.ts` with:
 
 Each action must call `requireHousehold()`, query the household's default Dinner slot, and filter by `household_id`.
 
-- [ ] **Step 2: Add weekly planner component**
+- [x] **Step 2: Add weekly planner component**
 
 Create `components/meal-planner/weekly-dinner-planner.tsx` that renders seven days starting from the selected week start, one dinner slot per day, recipe selector, and status badge.
 
-- [ ] **Step 3: Add planner page**
+- [x] **Step 3: Add planner page**
 
 Create `app/(app)/planner/page.tsx` that loads recipes and current week meal entries for the household.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -2305,7 +2308,7 @@ npm run lint
 
 Expected: both pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -2325,7 +2328,7 @@ git commit -m "feat: add weekly dinner planner"
 - Create: `components/shopping/shopping-list-view.tsx`
 - Create: `app/(app)/shopping/page.tsx`
 
-- [ ] **Step 1: Write export test**
+- [x] **Step 1: Write export test**
 
 Create `tests/domain/shopping-export.test.ts`:
 
@@ -2345,7 +2348,7 @@ describe("exportShoppingListText", () => {
 });
 ```
 
-- [ ] **Step 2: Implement export helper**
+- [x] **Step 2: Implement export helper**
 
 Create `lib/domain/shopping-export.ts`:
 
@@ -2368,7 +2371,7 @@ export function exportShoppingListText(items: ShoppingExportItem[]) {
 }
 ```
 
-- [ ] **Step 3: Add shopping actions**
+- [x] **Step 3: Add shopping actions**
 
 Create `app/actions/shopping.ts` with `generateShoppingList(formData)`. It must:
 
@@ -2381,11 +2384,11 @@ Create `app/actions/shopping.ts` with `generateShoppingList(formData)`. It must:
 7. Insert `shopping_list_items` rows.
 8. Revalidate `/shopping`.
 
-- [ ] **Step 4: Add shopping page and view**
+- [x] **Step 4: Add shopping page and view**
 
 Create `app/(app)/shopping/page.tsx` and `components/shopping/shopping-list-view.tsx`. The view must render generate controls, needed items, review flags, checkboxes, copyable text, and a downloadable plain text link.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run:
 
@@ -2397,7 +2400,7 @@ npm run lint
 
 Expected: tests, typecheck, and lint pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run:
 
@@ -2414,7 +2417,7 @@ git commit -m "feat: generate exportable shopping lists"
 - Create: `components/meal-planner/completion-dialog.tsx`
 - Modify: `components/meal-planner/weekly-dinner-planner.tsx`
 
-- [ ] **Step 1: Extend meal plan actions**
+- [x] **Step 1: Extend meal plan actions**
 
 Modify `app/actions/meal-plans.ts` to add:
 
@@ -2423,15 +2426,15 @@ Modify `app/actions/meal-plans.ts` to add:
 
 If a deduction plan item has `reviewRequired: true`, insert a deduction row with `status = 'review_required'` and do not change pantry quantity for that item.
 
-- [ ] **Step 2: Add completion dialog**
+- [x] **Step 2: Add completion dialog**
 
 Create `components/meal-planner/completion-dialog.tsx` that shows clean deductions and review-required items before submitting completion.
 
-- [ ] **Step 3: Wire planner buttons**
+- [x] **Step 3: Wire planner buttons**
 
 Modify `components/meal-planner/weekly-dinner-planner.tsx` to expose Complete, Skip, Restore, and Plan actions based on status.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -2443,7 +2446,7 @@ npm run lint
 
 Expected: tests, typecheck, and lint pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -2460,7 +2463,7 @@ git commit -m "feat: deduct pantry stock when meals are completed"
 - Modify: `supabase/tests/rls.sql`
 - Modify: `tests/e2e/mvp-flow.spec.ts`
 
-- [ ] **Step 1: Add household access integration test**
+- [x] **Step 1: Add household access integration test**
 
 Create `tests/integration/household-access.test.ts` with service-client setup that creates two local test users and verifies household-scoped queries only return rows for the authenticated user when using anon-authenticated clients.
 
@@ -2473,7 +2476,7 @@ const outsiderEmail = "outsider@example.test";
 
 The test must fail if an outsider can read or update another household's `recipes`, `pantry_items`, `meal_plan_entries`, or `shopping_lists`.
 
-- [ ] **Step 2: Expand RLS SQL notes**
+- [x] **Step 2: Expand RLS SQL notes**
 
 Modify `supabase/tests/rls.sql` to include explicit checks for tables with RLS enabled:
 
@@ -2499,7 +2502,7 @@ where schemaname = 'public'
 order by tablename;
 ```
 
-- [ ] **Step 3: Expand E2E acceptance flow**
+- [x] **Step 3: Expand E2E acceptance flow**
 
 Modify `tests/e2e/mvp-flow.spec.ts` to cover:
 
@@ -2511,7 +2514,7 @@ Modify `tests/e2e/mvp-flow.spec.ts` to cover:
 6. Mark meal completed.
 7. Confirm pantry quantity changed once.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -2524,7 +2527,7 @@ npm run lint
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -2541,7 +2544,7 @@ git commit -m "test: cover household security and MVP flow"
 - Create: `docs/local-development.md`
 - Create: `docs/security-notes.md`
 
-- [ ] **Step 1: Document local development**
+- [x] **Step 1: Document local development**
 
 Create `docs/local-development.md` with:
 
@@ -2560,7 +2563,7 @@ Create `docs/local-development.md` with:
 Use `npx supabase stop` to stop the local Supabase stack.
 ```
 
-- [ ] **Step 2: Document security notes**
+- [x] **Step 2: Document security notes**
 
 Create `docs/security-notes.md` with:
 
@@ -2576,7 +2579,7 @@ Create `docs/security-notes.md` with:
 - Retailer cart actions are not implemented in the MVP.
 ```
 
-- [ ] **Step 3: Update README**
+- [x] **Step 3: Update README**
 
 Update `README.md` with:
 
@@ -2586,7 +2589,7 @@ Update `README.md` with:
 - MVP acceptance flow.
 - Commands for `npm run test`, `npm run test:e2e`, `npm run typecheck`, and `npm run build`.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run:
 
@@ -2601,7 +2604,7 @@ docker compose build
 
 Expected: all commands pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 

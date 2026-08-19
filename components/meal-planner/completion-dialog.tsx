@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 
 import { completeMeal, getMealCompletionPreview } from "@/app/actions/meal-plans";
@@ -11,25 +11,9 @@ type CompletionPreview = {
   review: DeductionPlanItem[];
 };
 
-type CompletionState = { error: string | null };
-
-const initialCompletionState: CompletionState = { error: null };
-
 function quantityLabel(item: DeductionPlanItem) {
   if (item.quantity === null || !item.unit) return "Quantity needs review";
   return `${item.quantity} ${item.unit}`;
-}
-
-async function submitCompletion(
-  _previousState: CompletionState,
-  formData: FormData,
-): Promise<CompletionState> {
-  try {
-    await completeMeal(formData);
-    return initialCompletionState;
-  } catch {
-    return { error: "We could not complete this dinner. Please try again." };
-  }
 }
 
 function CompleteButton({ disabled }: { disabled: boolean }) {
@@ -69,24 +53,15 @@ function PreviewList({ items, tone }: { items: DeductionPlanItem[]; tone: "clean
 /** Opens an accessible pre-completion review of the pantry deductions for one dinner. */
 export function CompletionDialog({ entryId, recipeTitle }: { entryId: string; recipeTitle: string }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [isOpen, setIsOpen] = useState(false);
   const [preview, setPreview] = useState<CompletionPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewPending, startPreviewTransition] = useTransition();
-  const [completionState, completionAction] = useActionState(submitCompletion, initialCompletionState);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    if (isOpen && !dialog.open) dialog.showModal();
-    if (!isOpen && dialog.open) dialog.close();
-  }, [isOpen]);
 
   function openDialog() {
+    const dialog = dialogRef.current;
+    if (!dialog?.open) dialog?.showModal();
     setPreview(null);
     setPreviewError(null);
-    setIsOpen(true);
     startPreviewTransition(async () => {
       try {
         setPreview(await getMealCompletionPreview(entryId));
@@ -97,7 +72,7 @@ export function CompletionDialog({ entryId, recipeTitle }: { entryId: string; re
   }
 
   function closeDialog() {
-    setIsOpen(false);
+    dialogRef.current?.close();
   }
 
   return (
@@ -139,10 +114,9 @@ export function CompletionDialog({ entryId, recipeTitle }: { entryId: string; re
 
           <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
             <button className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700" onClick={closeDialog} type="button">Cancel</button>
-            <form action={completionAction}>
+            <form action={completeMeal}>
               <input name="entryId" type="hidden" value={entryId} />
               <CompleteButton disabled={preview === null || isPreviewPending || previewError !== null} />
-              {completionState.error ? <p className="mt-2 text-sm text-red-700" role="alert">{completionState.error}</p> : null}
             </form>
           </div>
         </div>

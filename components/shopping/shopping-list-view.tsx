@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { generateShoppingList } from "@/app/actions/shopping";
@@ -29,10 +29,6 @@ type ShoppingListViewProps = {
   items: ShoppingListItem[];
 };
 
-type GenerateState = { error: string | null };
-
-const initialGenerateState: GenerateState = { error: null };
-
 function dateFromIso(isoDate: string) {
   return new Date(`${isoDate}T00:00:00Z`);
 }
@@ -59,15 +55,6 @@ function defaultWeekRange() {
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
   };
-}
-
-async function submitGenerate(_previousState: GenerateState, formData: FormData): Promise<GenerateState> {
-  try {
-    await generateShoppingList(formData);
-    return initialGenerateState;
-  } catch {
-    return { error: "We could not generate a shopping list. Please try again." };
-  }
 }
 
 function GenerateButton() {
@@ -105,7 +92,6 @@ function ReviewFlag({ item }: { item: ShoppingListItem }) {
 /** Generates, reviews, exports, and locally checks off the latest shopping list. */
 export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps) {
   const defaults = useMemo(() => defaultWeekRange(), []);
-  const [generateState, generateAction] = useActionState(submitGenerate, initialGenerateState);
   const [checkedItemIds, setCheckedItemIds] = useState(() => new Set(
     items.filter((item) => item.status === "checked").map((item) => item.id),
   ));
@@ -145,7 +131,7 @@ export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps)
       <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-slate-950">Generate from your dinner plan</h2>
         <p className="mt-1 text-sm leading-6 text-slate-600">Choose the date range to compare planned recipe ingredients against your pantry.</p>
-        <form action={generateAction} className="mt-4 flex flex-wrap items-end gap-4">
+        <form action={generateShoppingList} className="mt-4 flex flex-wrap items-end gap-4">
           <label className="text-sm font-medium text-slate-800" htmlFor="shopping-start-date">
             Start date
             <input className="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-slate-950 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={defaults.startDate} id="shopping-start-date" name="startDate" required type="date" />
@@ -156,7 +142,6 @@ export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps)
           </label>
           <GenerateButton />
         </form>
-        {generateState.error ? <p className="mt-3 text-sm text-red-700" role="alert">{generateState.error}</p> : null}
       </div>
 
       {!shoppingList ? (
