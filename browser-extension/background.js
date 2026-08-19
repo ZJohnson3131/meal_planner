@@ -12,11 +12,22 @@ function extractRecipeDraft() {
     .trim()
     .slice(0, maxLength);
   const heading = (labels) => [...document.querySelectorAll("h1,h2,h3,h4,h5,h6,[role='heading']")]
-    .find((element) => labels.includes(clean(element.textContent, 100).toLowerCase()));
+    .find((element) => {
+      const label = clean(element.textContent, 100).toLowerCase();
+      return labels.some((name) => label === name || label.startsWith(`${name} `) || label.startsWith(`${name}(`) || label.startsWith(`${name}:`));
+    });
   const listAfter = (sectionHeading) => {
     if (!sectionHeading) return [];
-    const section = sectionHeading.parentElement;
-    const list = section?.querySelector("ul,ol") || (() => {
+    let container = sectionHeading.parentElement;
+    let list = null;
+    // Component layouts often wrap a heading and its list in different child
+    // elements. Search only a few containing levels to stay in the local
+    // semantic recipe section rather than falling into page navigation.
+    for (let depth = 0; container && depth < 4 && !list; depth += 1) {
+      list = container.querySelector("ul,ol");
+      container = container.parentElement;
+    }
+    list = list || (() => {
       let sibling = sectionHeading.nextElementSibling;
       while (sibling && !/^H[1-6]$/.test(sibling.tagName)) {
         const candidate = sibling.matches("ul,ol") ? sibling : sibling.querySelector("ul,ol");
@@ -29,7 +40,7 @@ function extractRecipeDraft() {
   };
   const ingredientLines = listAfter(heading(["ingredients"]));
   const methodLines = listAfter(heading(["method", "instructions", "directions", "preparation"]));
-  const servingsText = clean(document.body?.innerText, maxDraftBytes);
+  const servingsText = clean(document.body?.innerText || document.body?.textContent, maxDraftBytes);
   const servings = (servingsText.match(/(?:serves?|servings?|makes?|yield)\s*:?\s*(\d+(?:\.\d+)?)/i) || servingsText.match(/(\d+(?:\.\d+)?)\s*(?:serves?|servings?)/i))?.[1];
   const title = clean(document.querySelector("h1")?.textContent || document.querySelector("meta[property='og:title']")?.content || document.title, 500);
   return {
