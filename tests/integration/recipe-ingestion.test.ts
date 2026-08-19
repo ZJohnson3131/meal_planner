@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { parseRecipeHtml } from "@/lib/recipes/recipe-ingestion";
-import { RecipeFetchError, validateRecipeUrl } from "@/lib/recipes/safe-recipe-fetch";
+import { RECIPE_FETCH_HEADERS, RecipeFetchError, validateRecipeUrl } from "@/lib/recipes/safe-recipe-fetch";
 
 describe("parseRecipeHtml", () => {
   it("extracts JSON-LD recipe fields", () => {
@@ -103,6 +103,12 @@ describe("parseRecipeHtml", () => {
 });
 
 describe("validateRecipeUrl", () => {
+  it("uses ordinary browser-navigation headers for public recipe requests", () => {
+    expect(RECIPE_FETCH_HEADERS.Accept).toContain("text/html");
+    expect(RECIPE_FETCH_HEADERS["Accept-Language"]).toContain("en");
+    expect(RECIPE_FETCH_HEADERS["User-Agent"]).toContain("Mozilla/5.0");
+  });
+
   it("accepts an HTTPS URL that resolves to a public literal IP address", async () => {
     await expect(validateRecipeUrl("https://8.8.8.8/recipe")).resolves.toMatchObject({
       url: expect.objectContaining({ href: "https://8.8.8.8/recipe" }),
