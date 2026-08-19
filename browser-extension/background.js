@@ -1,8 +1,11 @@
 const LOCAL_IMPORT_URL = "http://127.0.0.1:3000/recipes/import";
 const MAX_DRAFT_BYTES = 12_000;
-const MAX_INGREDIENTS = 100;
 
 function extractRecipeDraft() {
+  // This function is serialized and executed in the recipe page, so it must
+  // not close over module-level constants or helper functions.
+  const maxDraftBytes = 12_000;
+  const maxIngredients = 100;
   const clean = (value, maxLength) => String(value ?? "")
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/\s+/g, " ")
@@ -22,11 +25,11 @@ function extractRecipeDraft() {
       }
       return null;
     })();
-    return list ? [...list.querySelectorAll(":scope > li")].slice(0, MAX_INGREDIENTS).map((item) => clean(item.textContent, 2_000)).filter(Boolean) : [];
+    return list ? [...list.querySelectorAll(":scope > li")].slice(0, maxIngredients).map((item) => clean(item.textContent, 2_000)).filter(Boolean) : [];
   };
   const ingredientLines = listAfter(heading(["ingredients"]));
   const methodLines = listAfter(heading(["method", "instructions", "directions", "preparation"]));
-  const servingsText = clean(document.body?.innerText, MAX_DRAFT_BYTES);
+  const servingsText = clean(document.body?.innerText, maxDraftBytes);
   const servings = (servingsText.match(/(?:serves?|servings?|makes?|yield)\s*:?\s*(\d+(?:\.\d+)?)/i) || servingsText.match(/(\d+(?:\.\d+)?)\s*(?:serves?|servings?)/i))?.[1];
   const title = clean(document.querySelector("h1")?.textContent || document.querySelector("meta[property='og:title']")?.content || document.title, 500);
   return {
@@ -50,7 +53,9 @@ function encodeDraft(draft) {
 browser.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !tab.url?.startsWith("http")) return;
   try {
-    const [{ result: draft }] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: extractRecipeDraft });
+    const results = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: extractRecipeDraft });
+    const draft = results?.[0]?.result;
+    if (!draft || typeof draft !== "object") throw new Error("The current page did not return a recipe draft.");
     const encoded = encodeDraft(draft);
     await browser.tabs.create({ url: `${LOCAL_IMPORT_URL}#draft=${encoded}` });
   } catch (error) {
