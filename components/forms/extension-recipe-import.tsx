@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 
 import { RecipeForm } from "@/components/forms/recipe-form";
 import { RECIPE_INGESTED_EVENT, type RecipeIngestedData } from "@/components/forms/url-ingest-form";
@@ -53,21 +53,22 @@ function decodeDraft(hash: string): RecipeIngestedData | null {
   }
 }
 
+function readInitialFragment(): { hasFragment: boolean; draft: RecipeIngestedData | null } {
+  if (typeof window === "undefined") return { hasFragment: false, draft: null };
+  const hash = window.location.hash;
+  return { hasFragment: Boolean(hash), draft: hash ? decodeDraft(hash) : null };
+}
+
 /** Reviews a bounded extension-provided draft after removing it from the URL. */
 export function ExtensionRecipeImport() {
-  const fragment = useSyncExternalStore(
-    () => () => {},
-    () => window.location.hash,
-    () => "",
-  );
-  const draft = useMemo(() => (fragment ? decodeDraft(fragment) : null), [fragment]);
-  const error = fragment && !draft ? "The browser extension draft was missing or invalid. Please try importing again." : null;
+  const [{ hasFragment, draft }] = useState(readInitialFragment);
+  const error = hasFragment && !draft ? "The browser extension draft was missing or invalid. Please try importing again." : null;
 
   useEffect(() => {
-    if (!fragment) return;
+    if (!hasFragment) return;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     if (draft) window.dispatchEvent(new CustomEvent<RecipeIngestedData>(RECIPE_INGESTED_EVENT, { detail: draft }));
-  }, [draft, fragment]);
+  }, [draft, hasFragment]);
 
   return (
     <div className="space-y-6">
@@ -77,7 +78,18 @@ export function ExtensionRecipeImport() {
         {error ? <p className="mt-3 text-sm text-red-700" role="alert">{error}</p> : null}
         {draft ? <p className="mt-3 text-sm text-emerald-800">Imported {draft.ingredients.length} ingredient{draft.ingredients.length === 1 ? "" : "s"} for review.</p> : null}
       </section>
-      {draft ? <RecipeForm /> : null}
+      {draft ? <RecipeForm initialRecipe={{
+        title: draft.title,
+        sourceUrl: draft.sourceUrl,
+        servings: draft.servings,
+        instructions: draft.instructions,
+        ingestionStatus: draft.ingestionStatus,
+        ingredients: draft.ingredients.map((ingredient) => ({
+          itemName: ingredient.itemName,
+          quantity: ingredient.quantity === null ? "" : String(ingredient.quantity),
+          unit: ingredient.unit ?? "",
+        })),
+      }} /> : null}
     </div>
   );
 }
