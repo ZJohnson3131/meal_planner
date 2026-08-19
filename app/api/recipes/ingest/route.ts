@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 15;
 
 const MAX_REQUEST_BYTES = 4 * 1024;
+const BLOCKED_IMPORT_MESSAGE = "This site blocks automatic imports. Copy the ingredients and method into the recipe form, or use the Firefox extension while viewing the recipe.";
 
 function failedRecipe(sourceUrl: string): ParsedRecipe {
   return {
@@ -23,6 +24,13 @@ function failedRecipe(sourceUrl: string): ParsedRecipe {
 
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status });
+}
+
+function hasNoUsableRecipeContent(recipe: ParsedRecipe): boolean {
+  return /^pardon our interruption$/i.test(recipe.title.trim())
+    || (recipe.title === "Untitled recipe"
+    && recipe.ingredients.length === 0
+    && recipe.instructions.trim().length === 0);
 }
 
 async function hasAuthenticatedHousehold(): Promise<boolean> {
@@ -82,7 +90,9 @@ export async function POST(request: Request) {
 
   try {
     const { html, finalUrl } = await fetchRecipeHtml(result.data);
-    return NextResponse.json(parseRecipeHtml(html, finalUrl));
+    const recipe = parseRecipeHtml(html, finalUrl);
+    if (hasNoUsableRecipeContent(recipe)) return jsonError(BLOCKED_IMPORT_MESSAGE, 422);
+    return NextResponse.json(recipe);
   } catch {
     return NextResponse.json(failedRecipe(result.data));
   }
