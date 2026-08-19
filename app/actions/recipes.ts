@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recipeSchema } from "@/lib/validation/recipes";
 
 const ingestionStatusSchema = z.enum(["manual", "parsed", "needs_review", "failed"]);
+const recipeIdSchema = z.string().uuid();
 
 function nullableText(value: FormDataEntryValue | null): string | null {
   const text = typeof value === "string" ? value.trim() : "";
@@ -94,5 +95,106 @@ export async function createRecipe(formData: FormData) {
   }
 
   revalidatePath("/recipes");
+  redirect(`/recipes/${recipe.id}`);
+}
+
+/**
+ * Replaces a household recipe's editable fields and ingredients. The recipe is
+ * checked against the active household before any mutation; RLS remains the
+ * second authorization boundary.
+ */
+export async function updateRecipe(recipeId: string, formData: FormData) {
+  const parsedId = recipeIdSchema.safeParse(recipeId);
+  const parsedRecipe = formDataToRecipeInput(formData);
+  const parsedStatus = ingestionStatusSchema.safeParse(formData.get("ingestionStatus") ?? "manual");
+
+  if (!parsedId.success || !parsedRecipe.success || !parsedStatus.success) {
+    throw new Error("Recipe details are invalid");
+  }
+
+  const { householdId } = await requireHousehold();
+  const supabase = await createClient();
+  const { data: existingRecipe, error: existingError } = await supabase
+    .from("recipes")
+    .select("id, title, description, source_url, favorite, servings, instructions, ingestion_status, recipe_ingredients(item_name, quantity, unit, notes, display_order)")
+    .eq("id", parsedId.data)
+    .eq("household_id", householdId)
+    .maybeSingle();
+
+  if (existingError) throw new Error("Failed to load recipe for update");
+  if (!existingRecipe) throw new Error("Recipe not found");
+
+  const recipe = existingRecipe;
+  const recipeInput = parsedRecipe.data;
+  const oldIngredients = recipe.recipe_ingredients ?? [];
+  const replacementIngredients = recipeInput.ingredients.map((ingredient, displayOrder) => ({
+    recipe_id: recipe.id,
+    item_name: ingredient.itemName,
+    quantity: ingredient.quantity,
+    unit: ingredient.unit,
+    notes: ingredient.notes ?? null,
+    display_order: displayOrder,
+  }));
+
+  async function restoreIngredients() {
+    const { error: deleteError } = await supabase
+      .from("recipe_ingredients")
+      .delete()
+      .eq("recipe_id", recipe.id);
+    if (deleteError) return deleteError;
+    if (oldIngredients.length === 0) return null;
+
+    const { error: insertError } = await supabase.from("recipe_ingredients").insert(
+      oldIngredients.map((ingredient) => ({
+        recipe_id: recipe.id,
+        item_name: ingredient.item_name,
+        quantity: ingredient.quantity,
+        unit: ingredient.unit,
+        notes: ingredient.notes,
+        display_order: ingredient.display_order,
+      })),
+    );
+    return insertError;
+  }
+
+  const { error: deleteError } = await supabase
+    .from("recipe_ingredients")
+    .delete()
+    .eq("recipe_id", recipe.id);
+  if (deleteError) {
+    throw new Error("Failed to replace recipe ingredients");
+  }
+
+  const { error: insertError } = await supabase.from("recipe_ingredients").insert(replacementIngredients);
+  if (insertError) {
+    const restoreError = await restoreIngredients();
+    if (restoreError) throw new Error("Failed to update recipe ingredients and restore the original recipe");
+    throw new Error("Failed to update recipe ingredients");
+  }
+
+  const { error: updateError } = await supabase
+    .from("recipes")
+    .update({
+      title: recipeInput.title,
+      // The current form does not expose a description field. Preserve it until
+      // the form explicitly supplies one rather than wiping imported text.
+      description: formData.has("description") ? recipeInput.description ?? null : recipe.description,
+      source_url: recipeInput.sourceUrl ?? null,
+      favorite: recipeInput.favorite,
+      servings: recipeInput.servings ?? null,
+      instructions: recipeInput.instructions,
+      ingestion_status: parsedStatus.data,
+    })
+    .eq("id", recipe.id)
+    .eq("household_id", householdId);
+
+  if (updateError) {
+    const restoreError = await restoreIngredients();
+    if (restoreError) throw new Error("Failed to update recipe and restore the original ingredients");
+    throw new Error("Failed to update recipe");
+  }
+
+  revalidatePath("/recipes");
+  revalidatePath(`/recipes/${recipe.id}`);
   redirect(`/recipes/${recipe.id}`);
 }

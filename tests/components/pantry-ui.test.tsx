@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/actions/pantry", () => ({
@@ -62,5 +63,25 @@ describe("PantryTable", () => {
     expect(within(table).getByLabelText("Expiry date for Rice")).toHaveValue("2026-12-01");
     expect(within(table).getByRole("button", { name: "Save" })).toHaveAttribute("type", "submit");
     expect(within(table).getByRole("button", { name: "Delete Rice" })).toHaveAttribute("type", "submit");
+  });
+
+  test("marks empty items and lets the user hide and show them without deleting them", async () => {
+    const user = userEvent.setup();
+    render(
+      <PantryTable
+        items={[
+          { id: "empty-item", item_name: "Rice", quantity: 0, unit: "g", category: null, expiry_date: null },
+          { id: "in-stock-item", item_name: "Pasta", quantity: 1, unit: "packet", category: null, expiry_date: null },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Empty")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Show empty items"));
+    expect(screen.queryByLabelText("Item name for Rice")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Item name for Pasta")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Show empty items"));
+    expect(screen.getByLabelText("Item name for Rice")).toBeInTheDocument();
   });
 });

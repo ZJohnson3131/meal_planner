@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { parseRecipeHtml } from "@/lib/recipes/recipe-ingestion";
-import { RecipeFetchError, validateRecipeUrl } from "@/lib/recipes/safe-recipe-fetch";
+import { RECIPE_FETCH_HEADERS, RecipeFetchError, validateRecipeUrl } from "@/lib/recipes/safe-recipe-fetch";
 
 describe("parseRecipeHtml", () => {
   it("extracts JSON-LD recipe fields", () => {
@@ -60,6 +60,32 @@ describe("parseRecipeHtml", () => {
     });
   });
 
+  it("extracts a Coles-style semantic recipe page when JSON-LD is unavailable", () => {
+    const html = `
+      <html><head><title>Spinach Pesto Gnocchi | Coles</title></head><body>
+        <main><article>
+          <h1>Spinach Pesto Gnocchi</h1>
+          <div><span>Serves</span><span>4</span></div>
+          <h2>Ingredients</h2>
+          <div><h3></h3><ul><li>500 g gnocchi</li><li>120 g baby spinach</li><li>1 can cannellini beans</li></ul></div>
+          <h2>Method</h2>
+          <div><ol><li><h3>Step 1</h3><p>Cook the gnocchi.</p></li><li><h3>Step 2</h3><p>Blend spinach into pesto and serve.</p></li></ol></div>
+        </article>
+      </body></html>`;
+
+    expect(parseRecipeHtml(html, "https://www.coles.com.au/recipes-inspiration/recipes/spinach-pesto-gnocchi")).toMatchObject({
+      title: "Spinach Pesto Gnocchi",
+      servings: 4,
+      ingredients: [
+        { itemName: "gnocchi", quantity: 500, unit: "g" },
+        { itemName: "baby spinach", quantity: 120, unit: "g" },
+        { itemName: "cannellini beans", quantity: 1, unit: "can" },
+      ],
+      instructions: "Cook the gnocchi.\n\nBlend spinach into pesto and serve.",
+      ingestionStatus: "parsed",
+    });
+  });
+
   it("strips markup and control characters from structured recipe text", () => {
     const html = `<script type="application/ld+json">{
       "@type": "Recipe",
@@ -70,13 +96,19 @@ describe("parseRecipeHtml", () => {
 
     expect(parseRecipeHtml(html, "https://example.test/soup")).toMatchObject({
       title: "Tomato Soup",
-      ingredients: [{ itemName: "tomatoes", quantity: 2, unit: "cans" }],
+      ingredients: [{ itemName: "tomatoes", quantity: 2, unit: "can" }],
       instructions: "Simmer.",
     });
   });
 });
 
 describe("validateRecipeUrl", () => {
+  it("uses ordinary browser-navigation headers for public recipe requests", () => {
+    expect(RECIPE_FETCH_HEADERS.Accept).toContain("text/html");
+    expect(RECIPE_FETCH_HEADERS["Accept-Language"]).toContain("en");
+    expect(RECIPE_FETCH_HEADERS["User-Agent"]).toContain("Mozilla/5.0");
+  });
+
   it("accepts an HTTPS URL that resolves to a public literal IP address", async () => {
     await expect(validateRecipeUrl("https://8.8.8.8/recipe")).resolves.toMatchObject({
       url: expect.objectContaining({ href: "https://8.8.8.8/recipe" }),

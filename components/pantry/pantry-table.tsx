@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { deletePantryItem, updatePantryItem } from "@/app/actions/pantry";
+import { SUPPORTED_COOKING_UNITS } from "@/lib/domain/units";
 
 export type PantryTableItem = {
   id: string;
@@ -36,16 +38,20 @@ function DeleteButton({ itemName }: { itemName: string }) {
 }
 
 function PantryRow({ item }: { item: PantryTableItem }) {
+  const isEmpty = Number(item.quantity) === 0;
   return (
     <tr className="border-b border-slate-200 last:border-0">
       <td className="p-3 align-top">
         <input aria-label={`Item name for ${item.item_name}`} className="w-full rounded-md border border-slate-300 px-2 py-1.5 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={item.item_name} form={`pantry-update-${item.id}`} name="itemName" required />
+        {isEmpty ? <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">Empty</span> : null}
       </td>
       <td className="p-3 align-top">
         <input aria-label={`Quantity for ${item.item_name}`} className="w-24 rounded-md border border-slate-300 px-2 py-1.5 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={String(item.quantity)} form={`pantry-update-${item.id}`} min="0" name="quantity" required step="any" type="number" />
       </td>
       <td className="p-3 align-top">
-        <input aria-label={`Unit for ${item.item_name}`} className="w-24 rounded-md border border-slate-300 px-2 py-1.5 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={item.unit} form={`pantry-update-${item.id}`} name="unit" required />
+        <select aria-label={`Unit for ${item.item_name}`} className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1.5 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={item.unit} form={`pantry-update-${item.id}`} name="unit" required>
+          {SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+        </select>
       </td>
       <td className="p-3 align-top">
         <input aria-label={`Category for ${item.item_name}`} className="w-32 rounded-md border border-slate-300 px-2 py-1.5 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={item.category ?? ""} form={`pantry-update-${item.id}`} name="category" placeholder="None" />
@@ -71,13 +77,25 @@ function PantryRow({ item }: { item: PantryTableItem }) {
 
 /** Displays and permits in-place editing or deletion of current pantry inventory. */
 export function PantryTable({ items }: PantryTableProps) {
+  const [showEmpty, setShowEmpty] = useState(true);
   if (items.length === 0) {
     return <p className="rounded-lg border border-dashed border-slate-300 p-6 text-slate-600">Your pantry is empty. Add an item above to start tracking what you have.</p>;
   }
 
+  const visibleItems = showEmpty ? items : items.filter((item) => Number(item.quantity) !== 0);
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200">
-      <table className="w-full min-w-[55rem] text-left text-sm">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-600">Empty items are retained so a completed meal can be reversed safely.</p>
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+          <input checked={showEmpty} onChange={(event) => setShowEmpty(event.target.checked)} type="checkbox" />
+          Show empty items
+        </label>
+      </div>
+      {visibleItems.length === 0 ? <p className="rounded-lg border border-dashed border-slate-300 p-4 text-slate-600">All pantry items are currently hidden because their quantity is zero.</p> : (
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full min-w-[55rem] text-left text-sm">
         <caption className="sr-only">Pantry inventory</caption>
         <thead className="bg-slate-50 text-slate-700">
           <tr>
@@ -89,8 +107,10 @@ export function PantryTable({ items }: PantryTableProps) {
             <th className="p-3 font-semibold" scope="col"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody>{items.map((item) => <PantryRow item={item} key={item.id} />)}</tbody>
-      </table>
+          <tbody>{visibleItems.map((item) => <PantryRow item={item} key={item.id} />)}</tbody>
+        </table>
+      </div>
+      )}
     </div>
   );
 }

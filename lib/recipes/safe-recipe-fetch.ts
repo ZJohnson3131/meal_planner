@@ -9,6 +9,15 @@ const MAX_REDIRECTS = 3;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 
+// Many public recipe sites return an interstitial document (often still HTTP
+// 200) to Node's default request profile. These are ordinary browser navigation
+// headers, not credentials or a bypass for access controls.
+export const RECIPE_FETCH_HEADERS = {
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-AU,en;q=0.9",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+} as const;
+
 type ResolvedAddress = { address: string; family: 4 | 6 };
 
 export class RecipeFetchError extends Error {}
@@ -109,7 +118,7 @@ function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: 
     const request = https.request(
       url,
       {
-        headers: { Accept: "text/html,application/xhtml+xml" },
+        headers: RECIPE_FETCH_HEADERS,
         lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
       },
       (response) => {

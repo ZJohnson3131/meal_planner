@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 
 import { createPantryItem, type PantryItemFormState } from "@/app/actions/pantry";
+import { SUPPORTED_COOKING_UNITS } from "@/lib/domain/units";
 
 const initialState: PantryItemFormState = { error: null, success: false };
 
@@ -73,14 +74,15 @@ export function PantryItemForm() {
           <label className="block text-sm font-medium text-slate-800" htmlFor="pantry-unit">
             Unit
           </label>
-          <input
-            autoComplete="off"
-            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+          <select
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100"
             id="pantry-unit"
             name="unit"
-            placeholder="g, mL, each"
             required
-          />
+          >
+            <option value="">Choose a unit</option>
+            {SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+          </select>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-800" htmlFor="pantry-category">

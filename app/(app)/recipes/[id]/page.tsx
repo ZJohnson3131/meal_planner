@@ -31,6 +31,7 @@ export default async function RecipeDetailsPage({ params }: { params: Promise<{ 
   return (
     <article className="mx-auto max-w-3xl space-y-8">
       <Link className="text-sm font-medium text-emerald-700 hover:underline" href="/recipes">← Recipes</Link>
+      <Link className="inline-flex rounded-md border border-emerald-700 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700" href={`/recipes/${recipe.id}/edit`}>Edit recipe</Link>
       <header className="space-y-3 border-b border-slate-200 pb-6">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-3xl font-semibold tracking-normal text-slate-950">{recipe.title}</h1>

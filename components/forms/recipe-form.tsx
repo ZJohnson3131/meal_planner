@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 
 import { createRecipe } from "@/app/actions/recipes";
 import { RECIPE_INGESTED_EVENT, type RecipeIngestedData } from "@/components/forms/url-ingest-form";
+import { SUPPORTED_COOKING_UNITS } from "@/lib/domain/units";
 
 type IngredientRow = {
   id: string;
@@ -13,14 +14,35 @@ type IngredientRow = {
   unit: string;
 };
 
+type RecipeFormIngredient = Omit<IngredientRow, "id">;
+
+export type RecipeFormInitialRecipe = {
+  title: string;
+  sourceUrl?: string | null;
+  servings?: number | string | null;
+  instructions?: string | null;
+  favorite?: boolean;
+  ingestionStatus?: "manual" | "parsed" | "needs_review" | "failed";
+  ingredients?: RecipeFormIngredient[];
+};
+
+type RecipeFormProps = {
+  initialRecipe?: RecipeFormInitialRecipe;
+  submitAction?: (formData: FormData) => void | Promise<void>;
+};
+
 const minimumIngredientRows = 5;
 
 function emptyIngredient(index: number): IngredientRow {
   return { id: `ingredient-${index}`, itemName: "", quantity: "", unit: "" };
 }
 
-function initialIngredients(): IngredientRow[] {
-  return Array.from({ length: minimumIngredientRows }, (_, index) => emptyIngredient(index));
+function initialIngredients(ingredients: RecipeFormIngredient[] = []): IngredientRow[] {
+  const rows = ingredients.map((ingredient, index) => ({ ...ingredient, id: `ingredient-${index}` }));
+  return [
+    ...rows,
+    ...Array.from({ length: Math.max(minimumIngredientRows - rows.length, 0) }, (_, index) => emptyIngredient(rows.length + index)),
+  ];
 }
 
 function SubmitButton() {
@@ -38,13 +60,18 @@ function SubmitButton() {
 }
 
 /** A fully editable recipe form for manual entry and reviewed URL imports. */
-export function RecipeForm() {
-  const [title, setTitle] = useState("");
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [servings, setServings] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [ingestionStatus, setIngestionStatus] = useState("manual");
-  const [ingredients, setIngredients] = useState<IngredientRow[]>(initialIngredients);
+export function RecipeForm({ initialRecipe, submitAction = createRecipe }: RecipeFormProps) {
+  const [title, setTitle] = useState(initialRecipe?.title ?? "");
+  const [sourceUrl, setSourceUrl] = useState(initialRecipe?.sourceUrl ?? "");
+  const [servings, setServings] = useState(initialRecipe?.servings === null || initialRecipe?.servings === undefined ? "" : String(initialRecipe.servings));
+  const [instructions, setInstructions] = useState(initialRecipe?.instructions ?? "");
+  const [favorite, setFavorite] = useState(initialRecipe?.favorite ?? false);
+  const [ingestionStatus, setIngestionStatus] = useState(initialRecipe?.ingestionStatus ?? "manual");
+  const [ingredients, setIngredients] = useState<IngredientRow[]>(() => initialIngredients(initialRecipe?.ingredients));
+
+  function markManualAfterReviewEdit() {
+    setIngestionStatus((status) => (status === "failed" || status === "needs_review" ? "manual" : status));
+  }
 
   useEffect(() => {
     function applyImportedRecipe(event: Event) {
@@ -76,43 +103,46 @@ export function RecipeForm() {
   }, []);
 
   function updateIngredient(id: string, field: keyof Omit<IngredientRow, "id">, value: string) {
+    markManualAfterReviewEdit();
     setIngredients((rows) => rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
   }
 
   function addIngredient() {
+    markManualAfterReviewEdit();
     setIngredients((rows) => [...rows, emptyIngredient(rows.length)]);
   }
 
   function removeIngredient(id: string) {
+    markManualAfterReviewEdit();
     setIngredients((rows) => (rows.length > minimumIngredientRows ? rows.filter((row) => row.id !== id) : rows));
   }
 
   return (
-    <form action={createRecipe} className="space-y-6" noValidate>
+    <form action={submitAction} className="space-y-6" noValidate>
       <input name="ingestionStatus" type="hidden" value={ingestionStatus} />
       <fieldset className="space-y-4">
         <legend className="text-lg font-semibold text-slate-950">Recipe details</legend>
         <div>
           <label className="block text-sm font-medium text-slate-800" htmlFor="recipe-title">Title</label>
-          <input className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" id="recipe-title" name="title" onChange={(event) => setTitle(event.target.value)} required value={title} />
+          <input className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" id="recipe-title" name="title" onChange={(event) => { markManualAfterReviewEdit(); setTitle(event.target.value); }} required value={title} />
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-800" htmlFor="recipe-source-url">Source URL</label>
-          <input autoComplete="url" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" id="recipe-source-url" name="sourceUrl" onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://example.com/recipe" type="url" value={sourceUrl} />
+          <input autoComplete="url" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" id="recipe-source-url" name="sourceUrl" onChange={(event) => { markManualAfterReviewEdit(); setSourceUrl(event.target.value); }} placeholder="https://example.com/recipe" type="url" value={sourceUrl} />
         </div>
         <div className="flex flex-wrap items-end gap-5">
           <label className="flex items-center gap-2 text-sm font-medium text-slate-800" htmlFor="recipe-favorite">
-            <input id="recipe-favorite" name="favorite" type="checkbox" />
+            <input checked={favorite} id="recipe-favorite" name="favorite" onChange={(event) => { markManualAfterReviewEdit(); setFavorite(event.target.checked); }} type="checkbox" />
             Favorite recipe
           </label>
           <div>
             <label className="block text-sm font-medium text-slate-800" htmlFor="recipe-servings">Servings</label>
-            <input className="mt-1 w-32 rounded-md border border-slate-300 px-3 py-2" id="recipe-servings" min="1" name="servings" onChange={(event) => setServings(event.target.value)} step="any" type="number" value={servings} />
+            <input className="mt-1 w-32 rounded-md border border-slate-300 px-3 py-2" id="recipe-servings" min="1" name="servings" onChange={(event) => { markManualAfterReviewEdit(); setServings(event.target.value); }} step="any" type="number" value={servings} />
           </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-800" htmlFor="recipe-instructions">Instructions</label>
-          <textarea className="mt-1 min-h-40 w-full rounded-md border border-slate-300 px-3 py-2" id="recipe-instructions" name="instructions" onChange={(event) => setInstructions(event.target.value)} value={instructions} />
+          <textarea className="mt-1 min-h-40 w-full rounded-md border border-slate-300 px-3 py-2" id="recipe-instructions" name="instructions" onChange={(event) => { markManualAfterReviewEdit(); setInstructions(event.target.value); }} value={instructions} />
         </div>
       </fieldset>
 
@@ -132,7 +162,10 @@ export function RecipeForm() {
               </label>
               <label className="text-sm text-slate-800">
                 <span className="sr-only">Ingredient {index + 1} unit</span>
-                <input className="w-full rounded-md border border-slate-300 px-3 py-2" name="ingredientUnit" onChange={(event) => updateIngredient(ingredient.id, "unit", event.target.value)} placeholder="Unit" value={ingredient.unit} />
+                <select className="w-full rounded-md border border-slate-300 bg-white px-3 py-2" name="ingredientUnit" onChange={(event) => updateIngredient(ingredient.id, "unit", event.target.value)} value={ingredient.unit}>
+                  <option value="">Unit</option>
+                  {SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                </select>
               </label>
               <button className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={ingredients.length <= minimumIngredientRows} onClick={() => removeIngredient(ingredient.id)} type="button">
                 Remove
