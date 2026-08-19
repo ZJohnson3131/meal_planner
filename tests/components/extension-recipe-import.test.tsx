@@ -6,7 +6,13 @@ vi.mock("@/app/actions/recipes", () => ({ createRecipe: vi.fn() }));
 import { ExtensionRecipeImport } from "@/components/forms/extension-recipe-import";
 
 function setDraft(value: unknown) {
-  window.location.hash = `draft=${btoa(JSON.stringify(value))}`;
+  // Match browser-extension/background.js: UTF-8 bytes, base64url, and no
+  // padding. This guards the real extension-to-page fragment contract.
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  const encoded = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  window.location.hash = `draft=${encoded}`;
 }
 
 afterEach(() => {
@@ -19,7 +25,8 @@ describe("ExtensionRecipeImport", () => {
       title: "Visible recipe",
       sourceUrl: "https://recipes.example/visible",
       servings: 4,
-      ingredients: [{ itemName: "Pasta", quantity: 400, unit: "g", notes: null }],
+      // The extractor conservatively leaves units unknown rather than guessing.
+      ingredients: [{ itemName: "Pasta", quantity: null, unit: null, notes: null }],
       instructions: "Cook and serve.",
     });
 
@@ -27,6 +34,7 @@ describe("ExtensionRecipeImport", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Visible recipe"));
     expect(screen.getByLabelText("Ingredient 1 name")).toHaveValue("Pasta");
+    expect(screen.getByLabelText("Ingredient 1 unit")).toHaveValue("");
     expect(screen.getByLabelText("Instructions")).toHaveValue("Cook and serve.");
     expect(window.location.hash).toBe("");
     expect(screen.getByText("Imported 1 ingredient for review.")).toBeInTheDocument();

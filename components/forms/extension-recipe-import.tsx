@@ -19,7 +19,8 @@ function decodeDraft(hash: string): RecipeIngestedData | null {
   if (!encoded || encoded.length > MAX_DRAFT_BYTES * 2) return null;
 
   try {
-    const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const unpadded = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const base64 = `${unpadded}${"=".repeat((4 - unpadded.length % 4) % 4)}`;
     const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
     const json = new TextDecoder().decode(bytes);
     if (json.length > MAX_DRAFT_BYTES) return null;
@@ -41,7 +42,7 @@ function decodeDraft(hash: string): RecipeIngestedData | null {
       const quantity = ingredient.quantity === null ? null : Number(ingredient.quantity);
       const unit = ingredient.unit === null ? null : plainText(ingredient.unit, 100);
       const notes = ingredient.notes === null || ingredient.notes === undefined ? null : plainText(ingredient.notes, 2_000);
-      if (!itemName || (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0)) || unit === null || notes === null && ingredient.notes != null) return null;
+      if (!itemName || (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0)) || notes === null && ingredient.notes != null) return null;
       return { itemName, quantity, unit, notes };
     });
     if (ingredients.some((ingredient) => ingredient === null)) return null;
