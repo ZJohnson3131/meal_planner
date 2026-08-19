@@ -11,9 +11,9 @@ type ExtractDraft = () => {
 
 async function loadInjectedExtractor(): Promise<ExtractDraft> {
   const source = await readFile(resolve(process.cwd(), "browser-extension/background.js"), "utf8");
-  const match = source.match(/function extractRecipeDraft\(\) \{[\s\S]*?\n\}\n\nfunction encodeDraft/);
+  const match = source.match(/function extractRecipeDraft\(\) \{[\s\S]*?\r?\n\}\r?\n\r?\nfunction encodeDraft/);
   if (!match) throw new Error("Could not locate injected extractor");
-  const extractorSource = match[0].replace(/\n\nfunction encodeDraft$/, "");
+  const extractorSource = match[0].replace(/\r?\n\r?\nfunction encodeDraft$/, "");
   const factory = new Function("document", "location", `${extractorSource}; return extractRecipeDraft;`) as (
     document: Document,
     location: Location,
