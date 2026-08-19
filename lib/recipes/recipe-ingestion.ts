@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 
 import { parseIngredientLine, type ParsedIngredient } from "@/lib/recipes/parse-ingredient-line";
 
@@ -7,6 +8,7 @@ const MAX_JSON_LD_SCRIPTS = 50;
 const MAX_JSON_LD_SCRIPT_LENGTH = 200_000;
 const MAX_INGREDIENTS = 500;
 const MAX_TEXT_LENGTH = 100_000;
+const MAX_SECTION_TEXT_LENGTH = 20_000;
 
 export type ParsedRecipe = {
   title: string;
@@ -74,22 +76,86 @@ function instructionText(value: unknown): string[] {
   return [];
 }
 
-function fallbackRecipe(html: string, sourceUrl: string): ParsedRecipe {
-  const title = plainText(cheerio.load(html)("title").first().text(), 500) || "Untitled recipe";
+function sectionHeading($: cheerio.CheerioAPI, names: string[]): cheerio.Cheerio<AnyNode> {
+  return $("h2, h3, h4, h5, h6, [role='heading']").filter((_, element) => {
+    const label = plainText($(element).text(), 200).toLowerCase();
+    return names.some((name) => label === name || label.startsWith(`${name} `) || label.startsWith(`${name}:`));
+  }).first();
+}
+
+function sectionListText(
+  $: cheerio.CheerioAPI,
+  heading: cheerio.Cheerio<AnyNode>,
+): string[] {
+  if (heading.length === 0) return [];
+
+  // Recipe sites commonly place the list directly after its heading. Looking
+  // only in the heading's nearby structure avoids treating navigation/footer
+  // lists as recipe content.
+  const siblingList = heading.nextAll().toArray().find((sibling) => {
+    const tagName = sibling.tagName?.toLowerCase();
+    return !tagName?.match(/^h[1-6]$/);
+  });
+  const list = siblingList && $(siblingList).is("ul, ol")
+    ? $(siblingList)
+    : siblingList
+      ? $(siblingList).children("ul, ol").first()
+      : heading.parent().children("ul, ol").first();
+
+  return list
+    .find("li")
+    .toArray()
+    .slice(0, MAX_INGREDIENTS)
+    .map((item) => plainText($(item).text(), 2_000))
+    .filter(Boolean);
+}
+
+function semanticRecipe(html: string, sourceUrl: string): ParsedRecipe {
+  const $ = cheerio.load(html);
+  $("script, style, noscript, template, svg").remove();
+  const title = plainText($("h1").first().text(), 500)
+    || plainText($("title").first().text(), 500)
+    || "Untitled recipe";
+  const ingredientLines = sectionListText($, sectionHeading($, ["ingredients"]));
+  const methodLines = sectionListText($, sectionHeading($, ["method", "instructions", "directions", "preparation"]));
+  const servingCandidates = [
+    ...$("[data-testid*='serv' i], [class*='serv' i], [aria-label*='serv' i]")
+      .toArray()
+      .slice(0, 20)
+      .map((element) => plainText($(element).text() || $(element).attr("aria-label"), 200)),
+    plainText($("article").first().text() || $("body").text(), MAX_SECTION_TEXT_LENGTH),
+  ];
+  const servings = servingCandidates
+    .map((candidate) => candidate.match(/(?:serves?|servings?|makes?|yield)\s*:?\s*(\d+(?:\.\d+)?)/i)
+      ?? candidate.match(/(\d+(?:\.\d+)?)\s*(?:serves?|servings?)/i))
+    .map((match) => (match ? Number(match[1]) : null))
+    .find((value): value is number => value !== null && Number.isFinite(value) && value > 0) ?? null;
+
   return {
     title,
     sourceUrl,
-    servings: null,
-    ingredients: [],
-    instructions: "",
+    servings,
+    ingredients: ingredientLines.map((line) => parseIngredientLine(line)).filter((ingredient) => ingredient.itemName.length > 0),
+    instructions: methodLines.join("\n\n").slice(0, MAX_TEXT_LENGTH),
     ingestionStatus: "needs_review",
   };
 }
 
+function fallbackRecipe(html: string, sourceUrl: string): ParsedRecipe {
+  const semantic = semanticRecipe(html, sourceUrl);
+  const complete = semantic.title !== "Untitled recipe"
+    && semantic.ingredients.length > 0
+    && semantic.instructions.length > 0;
+  return {
+    ...semantic,
+    ingestionStatus: complete ? "parsed" : "needs_review",
+  };
+}
+
 /**
- * Extracts schema.org Recipe JSON-LD only. The returned strings are plain text
- * and remain user-editable; missing or incomplete data is deliberately marked
- * `needs_review` rather than trusted as a complete import.
+ * Extracts schema.org Recipe JSON-LD, then supplements missing data with nearby
+ * semantic recipe headings/lists. Returned strings are plain text and remain
+ * user-editable; incomplete results are deliberately marked `needs_review`.
  */
 export function parseRecipeHtml(html: string, sourceUrl: string): ParsedRecipe {
   const safeSourceUrl = sourceUrlOrEmpty(sourceUrl);
@@ -116,6 +182,8 @@ export function parseRecipeHtml(html: string, sourceUrl: string): ParsedRecipe {
   const recipe = nodes.find(isRecipe);
   if (!recipe) return fallbackRecipe(html, safeSourceUrl);
 
+  const semantic = semanticRecipe(html, safeSourceUrl);
+
   const title = plainText(recipe.name, 500) || "Untitled recipe";
   const ingredients = Array.isArray(recipe.recipeIngredient)
     ? recipe.recipeIngredient
@@ -127,14 +195,20 @@ export function parseRecipeHtml(html: string, sourceUrl: string): ParsedRecipe {
     .filter(Boolean)
     .join("\n\n")
     .slice(0, MAX_TEXT_LENGTH);
-  const complete = title !== "Untitled recipe" && ingredients.length > 0 && instructions.length > 0;
+  const resolvedTitle = title !== "Untitled recipe" ? title : semantic.title;
+  const resolvedIngredients = ingredients.length > 0 ? ingredients : semantic.ingredients;
+  const resolvedInstructions = instructions || semantic.instructions;
+  const resolvedServings = parseServings(recipe.recipeYield) ?? semantic.servings;
+  const complete = resolvedTitle !== "Untitled recipe"
+    && resolvedIngredients.length > 0
+    && resolvedInstructions.length > 0;
 
   return {
-    title,
+    title: resolvedTitle,
     sourceUrl: safeSourceUrl,
-    servings: parseServings(recipe.recipeYield),
-    ingredients,
-    instructions,
+    servings: resolvedServings,
+    ingredients: resolvedIngredients,
+    instructions: resolvedInstructions,
     ingestionStatus: complete ? "parsed" : "needs_review",
   };
 }

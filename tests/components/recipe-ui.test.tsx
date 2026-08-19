@@ -92,6 +92,51 @@ describe("recipe URL review flow", () => {
     expect(screen.getByDisplayValue("parsed")).toHaveAttribute("name", "ingestionStatus");
   });
 
+  test("marks a reviewed import as manual when the user changes it before saving", async () => {
+    const user = userEvent.setup();
+    render(<RecipeForm />);
+
+    window.dispatchEvent(new CustomEvent("meal-planner:recipe-ingested", {
+      detail: {
+        title: "Failed import draft",
+        sourceUrl: "https://recipes.example/draft",
+        servings: null,
+        ingredients: [],
+        instructions: "",
+        ingestionStatus: "failed",
+      },
+    }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("failed")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Title"), " corrected");
+    expect(screen.getByDisplayValue("manual")).toHaveAttribute("name", "ingestionStatus");
+  });
+
+  test("prefills a recipe edit form and sends edits to the supplied action", async () => {
+    const saveChanges = vi.fn();
+    render(
+      <RecipeForm
+        initialRecipe={{
+          title: "Existing soup",
+          sourceUrl: "https://recipes.example/soup",
+          servings: 3,
+          instructions: "Simmer.",
+          favorite: true,
+          ingestionStatus: "needs_review",
+          ingredients: [{ itemName: "Tomatoes", quantity: "2", unit: "can" }],
+        }}
+        submitAction={saveChanges}
+      />,
+    );
+
+    expect(screen.getByLabelText("Title")).toHaveValue("Existing soup");
+    expect(screen.getByLabelText("Source URL")).toHaveValue("https://recipes.example/soup");
+    expect(screen.getByLabelText("Servings")).toHaveValue(3);
+    expect(screen.getByLabelText("Ingredient 1 name")).toHaveValue("Tomatoes");
+    expect(screen.getByLabelText("Ingredient 1 unit")).toHaveValue("can");
+    expect(screen.getByLabelText("Favorite recipe")).toBeChecked();
+  });
+
   test("shows a review warning for a successful incomplete import", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({

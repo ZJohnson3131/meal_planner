@@ -60,6 +60,32 @@ describe("parseRecipeHtml", () => {
     });
   });
 
+  it("extracts a Coles-style semantic recipe page when JSON-LD is unavailable", () => {
+    const html = `
+      <html><head><title>Spinach Pesto Gnocchi | Coles</title></head><body>
+        <main><article>
+          <h1>Spinach Pesto Gnocchi</h1>
+          <p class="recipe-servings">Serves: 4</p>
+          <h2>Ingredients</h2>
+          <ul><li>500 g gnocchi</li><li>120 g baby spinach</li><li>1 can cannellini beans</li></ul>
+          <h2>Method</h2>
+          <ol><li>Cook the gnocchi.</li><li>Blend spinach into pesto and serve.</li></ol>
+        </article>
+      </body></html>`;
+
+    expect(parseRecipeHtml(html, "https://www.coles.com.au/recipes-inspiration/recipes/spinach-pesto-gnocchi")).toMatchObject({
+      title: "Spinach Pesto Gnocchi",
+      servings: 4,
+      ingredients: [
+        { itemName: "gnocchi", quantity: 500, unit: "g" },
+        { itemName: "baby spinach", quantity: 120, unit: "g" },
+        { itemName: "cannellini beans", quantity: 1, unit: "can" },
+      ],
+      instructions: "Cook the gnocchi.\n\nBlend spinach into pesto and serve.",
+      ingestionStatus: "parsed",
+    });
+  });
+
   it("strips markup and control characters from structured recipe text", () => {
     const html = `<script type="application/ld+json">{
       "@type": "Recipe",
@@ -70,7 +96,7 @@ describe("parseRecipeHtml", () => {
 
     expect(parseRecipeHtml(html, "https://example.test/soup")).toMatchObject({
       title: "Tomato Soup",
-      ingredients: [{ itemName: "tomatoes", quantity: 2, unit: "cans" }],
+      ingredients: [{ itemName: "tomatoes", quantity: 2, unit: "can" }],
       instructions: "Simmer.",
     });
   });

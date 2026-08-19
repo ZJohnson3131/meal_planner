@@ -26,7 +26,9 @@ test("a household can plan, shop for, and complete a dinner exactly once", async
   // fresh local checkout. Keep the acceptance flow's assertion focused on its
   // observable success state rather than the default five-second expectation.
   test.setTimeout(90_000);
-  const email = `mvp-flow-${Date.now()}@example.test`;
+  const runId = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  const email = `mvp-flow-${runId}@example.test`;
+  const recipeTitle = `Rice bowl ${runId}`;
 
   await page.goto("/signup");
   await page.getByLabel("Display name").fill("MVP flow user");
@@ -43,7 +45,7 @@ test("a household can plan, shop for, and complete a dinner exactly once", async
   await page.waitForTimeout(500);
   await page.getByLabel("Item name").fill("Rice");
   await page.getByLabel("Quantity").fill("100");
-  await page.getByLabel("Unit").fill("g");
+  await page.getByLabel("Unit").selectOption("g");
   await page.getByRole("button", { name: "Add to pantry" }).click();
   await expect(page.getByText("Pantry item added.")).toBeVisible({ timeout: 15_000 });
   // The form exposes a local success state while the table is rendered by the
@@ -55,16 +57,16 @@ test("a household can plan, shop for, and complete a dinner exactly once", async
 
   await appNav.getByRole("link", { name: "Recipes" }).click();
   await page.getByRole("link", { name: /add recipe/i }).click();
-  await page.getByLabel("Title").fill("Rice bowl");
+  await page.getByLabel("Title").fill(recipeTitle);
   await page.getByLabel("Ingredient 1 name").fill("Rice");
   await page.getByLabel("Ingredient 1 quantity").fill("200");
-  await page.getByLabel("Ingredient 1 unit").fill("g");
+  await page.getByLabel("Ingredient 1 unit").selectOption("g");
   await page.getByRole("button", { name: "Save recipe" }).click();
   await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/, { timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "Rice bowl" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: recipeTitle, exact: true })).toBeVisible();
 
   await appNav.getByRole("link", { name: "Planner", exact: true }).click();
-  await page.getByLabel("Recipe").first().selectOption({ label: "Rice bowl" });
+  await page.getByLabel("Recipe").first().selectOption({ label: recipeTitle });
   // This client component is first hydrated after the planner navigation.
   // Let its action binding attach before submitting the selected recipe.
   await page.waitForTimeout(500);
@@ -95,12 +97,32 @@ test("a household can plan, shop for, and complete a dinner exactly once", async
   // planner page, so give its open handler time to hydrate before clicking.
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: "Complete dinner" }).click();
-  await expect(page.getByRole("heading", { name: /complete rice bowl/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Complete ${recipeTitle}`, exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pantry deductions" })).toBeVisible();
   await page.getByRole("button", { name: "Confirm completion" }).click();
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();
 
   await appNav.getByRole("link", { name: "Pantry" }).click();
   await expect(page.getByLabel("Quantity for Rice").first()).toHaveValue("0");
-  await expect(page.getByRole("button", { name: "Complete dinner" })).toHaveCount(0);
+  await expect(page.getByText("Empty", { exact: true })).toBeVisible();
+  await page.getByLabel("Show empty items").uncheck();
+  await expect(page.getByLabel("Item name for Rice")).toHaveCount(0);
+  await page.getByLabel("Show empty items").check();
+  await expect(page.getByLabel("Item name for Rice")).toHaveCount(1);
+
+  await appNav.getByRole("link", { name: "Planner", exact: true }).click();
+  await page.waitForTimeout(500);
+  await page.getByLabel("I understand this restores the recorded pantry deductions where possible.").check();
+  await page.getByRole("button", { name: "Reverse completion" }).click();
+  await expect(page.getByText("Planned", { exact: true }).first()).toBeVisible();
+  await appNav.getByRole("link", { name: "Pantry" }).click();
+  await expect(page.getByLabel("Quantity for Rice").first()).toHaveValue("200");
+
+  await appNav.getByRole("link", { name: "Planner", exact: true }).click();
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Complete dinner" }).click();
+  await page.getByRole("button", { name: "Confirm completion" }).click();
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+  await appNav.getByRole("link", { name: "Pantry" }).click();
+  await expect(page.getByText("Empty", { exact: true })).toBeVisible();
 });

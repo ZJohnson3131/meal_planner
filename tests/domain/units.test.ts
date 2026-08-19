@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertQuantity, normalizeUnit } from "@/lib/domain/units";
+import { convertQuantity, normalizeSupportedUnit, normalizeUnit } from "@/lib/domain/units";
 
 describe("unit conversion", () => {
   it("normalizes supported unit aliases", () => {
@@ -7,6 +7,12 @@ describe("unit conversion", () => {
     expect(normalizeUnit("KG")).toBe("kg");
     expect(normalizeUnit("litres")).toBe("l");
     expect(normalizeUnit("tablespoons")).toBe("tbsp");
+    expect(normalizeSupportedUnit("pkts")).toBe("packet");
+    expect(normalizeSupportedUnit("cans")).toBe("can");
+    expect(normalizeSupportedUnit("cloves")).toBe("clove");
+    expect(normalizeSupportedUnit("bunches")).toBe("bunch");
+    expect(normalizeSupportedUnit("slices")).toBe("slice");
+    expect(normalizeSupportedUnit("pinch")).toBeNull();
   });
 
   it("converts mass within the same dimension", () => {
@@ -24,5 +30,13 @@ describe("unit conversion", () => {
       ok: false,
       reason: "Cannot convert each to g",
     });
+  });
+
+  it("does not equate different count units", () => {
+    expect(convertQuantity(1, "can", "packet")).toEqual({
+      ok: false,
+      reason: "Cannot convert can to packet",
+    });
+    expect(convertQuantity(2, "cans", "can")).toEqual({ ok: true, quantity: 2, unit: "can" });
   });
 });
