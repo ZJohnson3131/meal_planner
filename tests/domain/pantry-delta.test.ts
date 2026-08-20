@@ -34,4 +34,34 @@ describe("calculatePantryDelta", () => {
       reviewReason: "Cannot convert g to each",
     });
   });
+
+  it("preserves non-aggregatable source requirements without inventing a partial delta", () => {
+    const sourceRequirements = [
+      { itemName: "tomatoes", quantity: 400, unit: "g" },
+      { itemName: "tomatoes", quantity: 2, unit: "can" },
+    ];
+    const result = calculatePantryDelta({
+      required: [{
+        itemName: "tomatoes",
+        quantity: null,
+        unit: null,
+        reviewRequired: true,
+        reviewReason: "Cannot combine requirements",
+        sourceRequirements,
+      }],
+      pantry: [{ id: "p1", itemName: "Tomatoes", quantity: 1, unit: "can" }],
+    });
+
+    expect(result).toEqual([{
+      itemName: "tomatoes",
+      requiredQuantity: null,
+      pantryQuantity: null,
+      deltaQuantity: null,
+      unit: null,
+      reviewRequired: true,
+      reviewReason: "Cannot combine requirements",
+      pantryItemId: "p1",
+      sourceRequirements,
+    }]);
+  });
 });

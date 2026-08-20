@@ -90,62 +90,29 @@ describe("meal completion actions", () => {
     expect(mocks.buildDeductionPlan).toHaveBeenCalledWith(expect.objectContaining({ mealPlanEntryId: entryId }));
   });
 
-  test("does not apply pantry deductions again when a dinner is already completed", async () => {
+  test("delegates same-entry idempotency to the locked completion RPC", async () => {
+    mocks.rpc.mockResolvedValue({ error: null });
     mocks.createClient.mockResolvedValue(dinnerClient("completed"));
     const { completeMeal } = await import("@/app/actions/meal-plans");
 
     await expect(completeMeal(entryFormData())).resolves.toBeUndefined();
     expect(mocks.buildDeductionPlan).not.toHaveBeenCalled();
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+    expect(mocks.rpc).toHaveBeenCalledWith("complete_meal_plan_entry", {
+      p_entry_id: entryId,
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/pantry");
   });
 
-  test("sends every deduction to the atomic completion RPC", async () => {
-    mocks.buildDeductionPlan.mockReturnValue([
-      {
-        recipeIngredientId: "ingredient-1",
-        pantryItemId: "pantry-1",
-        itemName: "rice",
-        quantity: 100,
-        unit: "g",
-        reviewRequired: false,
-        reviewReason: null,
-      },
-      {
-        recipeIngredientId: "ingredient-2",
-        pantryItemId: null,
-        itemName: "oil",
-        quantity: null,
-        unit: null,
-        reviewRequired: true,
-        reviewReason: "No pantry match",
-      },
-    ]);
+  test("uses only the database-derived completion RPC and never sends a client-authored deduction plan", async () => {
     mocks.rpc.mockResolvedValue({ error: null });
-    mocks.createClient.mockResolvedValueOnce(dinnerClient("planned")).mockResolvedValueOnce(planClient());
+    mocks.createClient.mockResolvedValue(dinnerClient("planned"));
     const { completeMeal } = await import("@/app/actions/meal-plans");
 
     await expect(completeMeal(entryFormData())).resolves.toBeUndefined();
-    expect(mocks.rpc).toHaveBeenCalledWith("apply_meal_completion_deductions", {
+    expect(mocks.rpc).toHaveBeenCalledWith("complete_meal_plan_entry", {
       p_entry_id: entryId,
-      p_deductions: [
-        {
-          recipeIngredientId: "ingredient-1",
-          pantryItemId: "pantry-1",
-          itemName: "rice",
-          quantity: 100,
-          unit: "g",
-          status: "applied",
-        },
-        {
-          recipeIngredientId: "ingredient-2",
-          pantryItemId: null,
-          itemName: "oil",
-          quantity: 0,
-          unit: "unknown",
-          status: "review_required",
-        },
-      ],
     });
+    expect(mocks.buildDeductionPlan).not.toHaveBeenCalled();
   });
 
   test("aggregates matching pantry deductions in the completion preview", async () => {

@@ -2,36 +2,22 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
-  deleteRecipe: vi.fn(),
-  insertIngredients: vi.fn(),
-  insertRecipe: vi.fn(),
-  recipeDeleteEq: vi.fn(),
-  recipeInsertSelect: vi.fn(),
-  recipeInsertSingle: vi.fn(),
+  existingMaybeSingle: vi.fn(),
   revalidatePath: vi.fn(),
-  redirect: vi.fn((path: string) => {
-    throw new Error(`redirect:${path}`);
-  }),
+  redirect: vi.fn((path: string) => { throw new Error(`redirect:${path}`); }),
   requireHousehold: vi.fn(),
+  rpc: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/household", () => ({
-  requireHousehold: mocks.requireHousehold,
-}));
+vi.mock("@/lib/auth/household", () => ({ requireHousehold: mocks.requireHousehold }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
+vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: mocks.createClient,
-}));
+const recipeId = "b7f9ae89-030c-48e8-a616-6f98415eaf00";
+const ingredientId = "22b6054d-3faf-456a-922d-c5fc9d7d0e6e";
 
-vi.mock("next/cache", () => ({
-  revalidatePath: mocks.revalidatePath,
-}));
-
-vi.mock("next/navigation", () => ({
-  redirect: mocks.redirect,
-}));
-
-function recipeFormData() {
+function recipeFormData(includeIds = false) {
   const formData = new FormData();
   formData.set("title", "Weeknight pasta");
   formData.set("description", "A quick dinner");
@@ -40,112 +26,91 @@ function recipeFormData() {
   formData.set("servings", "4");
   formData.set("instructions", "Boil the pasta.");
   formData.set("ingestionStatus", "parsed");
+  formData.append("ingredientId", includeIds ? ingredientId : "");
   formData.append("ingredientName", "Pasta");
   formData.append("ingredientQuantity", "500");
   formData.append("ingredientUnit", "g");
   formData.append("ingredientNotes", "dried");
-  formData.append("ingredientName", "Olive oil");
-  formData.append("ingredientQuantity", "2");
-  formData.append("ingredientUnit", "tbsp");
-  formData.append("ingredientNotes", "");
   return formData;
 }
 
-describe("createRecipe", () => {
+function client() {
+  const query = {
+    select: vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ maybeSingle: mocks.existingMaybeSingle }),
+      }),
+    }),
+  };
+  return { from: vi.fn(() => query), rpc: mocks.rpc };
+}
+
+describe("transactional recipe actions", () => {
   beforeEach(() => {
     vi.resetModules();
     Object.values(mocks).forEach((mock) => mock.mockReset());
-
-    mocks.redirect.mockImplementation((path: string) => {
-      throw new Error(`redirect:${path}`);
-    });
+    mocks.redirect.mockImplementation((path: string) => { throw new Error(`redirect:${path}`); });
     mocks.requireHousehold.mockResolvedValue({ householdId: "household-123" });
-    mocks.recipeInsertSingle.mockResolvedValue({ data: { id: "recipe-123" }, error: null });
-    mocks.recipeInsertSelect.mockReturnValue({ single: mocks.recipeInsertSingle });
-    mocks.insertRecipe.mockReturnValue({ select: mocks.recipeInsertSelect });
-    mocks.insertIngredients.mockResolvedValue({ error: null });
-    mocks.recipeDeleteEq.mockReturnValue({ eq: mocks.recipeDeleteEq });
-    mocks.deleteRecipe.mockReturnValue({ eq: mocks.recipeDeleteEq });
-    mocks.createClient.mockResolvedValue({
-      from: vi.fn((table: string) => {
-        if (table === "recipes") {
-          return { insert: mocks.insertRecipe, delete: mocks.deleteRecipe };
-        }
-        if (table === "recipe_ingredients") {
-          return { insert: mocks.insertIngredients };
-        }
-        throw new Error(`Unexpected table: ${table}`);
-      }),
+    mocks.rpc.mockResolvedValue({ data: recipeId, error: null });
+    mocks.existingMaybeSingle.mockResolvedValue({ data: { id: recipeId, description: "A quick dinner" }, error: null });
+    mocks.createClient.mockResolvedValue(client());
+  });
+
+  test("creates recipe fields, notes, and ordered ingredients in one RPC", async () => {
+    const { createRecipe } = await import("@/app/actions/recipes");
+    await expect(createRecipe(recipeFormData())).rejects.toThrow(`redirect:/recipes/${recipeId}`);
+
+    expect(mocks.rpc).toHaveBeenCalledWith("create_recipe_with_ingredients", {
+      p_household_id: "household-123",
+      p_ingredients: [{ itemName: "Pasta", notes: "dried", quantity: 500, unit: "g" }],
+      p_recipe: {
+        description: "A quick dinner",
+        favorite: true,
+        ingestionStatus: "parsed",
+        instructions: "Boil the pasta.",
+        servings: 4,
+        sourceUrl: "https://example.com/pasta",
+        title: "Weeknight pasta",
+      },
     });
   });
 
-  test("inserts a household-scoped recipe and ordered ingredients before redirecting", async () => {
-    const { createRecipe } = await import("@/app/actions/recipes");
-
-    await expect(createRecipe(recipeFormData())).rejects.toThrow(
-      "redirect:/recipes/recipe-123",
+  test("keeps stable ingredient IDs and notes when editing", async () => {
+    const { updateRecipe } = await import("@/app/actions/recipes");
+    await expect(updateRecipe(recipeId, recipeFormData(true))).rejects.toThrow(
+      `redirect:/recipes/${recipeId}`,
     );
 
-    expect(mocks.insertRecipe).toHaveBeenCalledWith({
-      household_id: "household-123",
-      title: "Weeknight pasta",
-      description: "A quick dinner",
-      source_url: "https://example.com/pasta",
-      favorite: true,
-      servings: 4,
-      instructions: "Boil the pasta.",
-      ingestion_status: "parsed",
+    expect(mocks.rpc).toHaveBeenCalledWith("update_recipe_with_ingredients", {
+      p_ingredients: [{ id: ingredientId, itemName: "Pasta", notes: "dried", quantity: 500, unit: "g" }],
+      p_recipe_id: recipeId,
+      p_recipe: {
+        description: "A quick dinner",
+        favorite: true,
+        ingestionStatus: "parsed",
+        instructions: "Boil the pasta.",
+        servings: 4,
+        sourceUrl: "https://example.com/pasta",
+        title: "Weeknight pasta",
+      },
     });
-    expect(mocks.insertIngredients).toHaveBeenCalledWith([
-      {
-        recipe_id: "recipe-123",
-        item_name: "Pasta",
-        quantity: 500,
-        unit: "g",
-        notes: "dried",
-        display_order: 0,
-      },
-      {
-        recipe_id: "recipe-123",
-        item_name: "Olive oil",
-        quantity: 2,
-        unit: "tbsp",
-        notes: null,
-        display_order: 1,
-      },
-    ]);
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/recipes");
   });
 
-  test("rejects recipes without usable ingredients before database access", async () => {
-    const formData = new FormData();
-    formData.set("title", "Empty recipe");
-    formData.set("instructions", "Nothing to cook.");
-    formData.append("ingredientName", "   ");
+  test("does not redirect or revalidate when a transactional recipe RPC fails", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: new Error("ingredient rejected") });
     const { createRecipe } = await import("@/app/actions/recipes");
 
-    await expect(createRecipe(formData)).rejects.toThrow("Recipe details are invalid");
-
-    expect(mocks.requireHousehold).not.toHaveBeenCalled();
-    expect(mocks.createClient).not.toHaveBeenCalled();
-  });
-
-  test("deletes the household-scoped recipe when ingredient insertion fails", async () => {
-    mocks.insertIngredients.mockResolvedValue({ error: new Error("insert failed") });
-    const { createRecipe } = await import("@/app/actions/recipes");
-
-    await expect(createRecipe(recipeFormData())).rejects.toThrow(
-      "Failed to create recipe ingredients",
-    );
-
-    expect(mocks.deleteRecipe).toHaveBeenCalledWith();
-    expect(mocks.recipeDeleteEq).toHaveBeenNthCalledWith(1, "id", "recipe-123");
-    expect(mocks.recipeDeleteEq).toHaveBeenNthCalledWith(
-      2,
-      "household_id",
-      "household-123",
-    );
+    await expect(createRecipe(recipeFormData())).rejects.toThrow("We could not create this recipe");
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  test("rejects an ingredient ID not shaped as a UUID before database access", async () => {
+    const formData = recipeFormData(true);
+    formData.set("ingredientId", "forged-id");
+    const { updateRecipe } = await import("@/app/actions/recipes");
+
+    await expect(updateRecipe(recipeId, formData)).rejects.toThrow("Recipe details are invalid");
+    expect(mocks.requireHousehold).not.toHaveBeenCalled();
   });
 });

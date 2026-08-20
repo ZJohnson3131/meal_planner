@@ -8,13 +8,21 @@ import { RECIPE_INGESTED_EVENT, type RecipeIngestedData } from "@/components/for
 import { SUPPORTED_COOKING_UNITS } from "@/lib/domain/units";
 
 type IngredientRow = {
-  id: string;
+  ingredientId: string;
   itemName: string;
+  notes: string;
   quantity: string;
+  rowKey: string;
   unit: string;
 };
 
-type RecipeFormIngredient = Omit<IngredientRow, "id">;
+export type RecipeFormIngredient = {
+  id?: string;
+  itemName: string;
+  notes?: string | null;
+  quantity: string;
+  unit: string;
+};
 
 export type RecipeFormInitialRecipe = {
   title: string;
@@ -31,17 +39,32 @@ type RecipeFormProps = {
   submitAction?: (formData: FormData) => void | Promise<void>;
 };
 
-const minimumIngredientRows = 5;
+const MINIMUM_INGREDIENT_ROWS = 5;
+const supportedUnitSet = new Set<string>(SUPPORTED_COOKING_UNITS);
 
-function emptyIngredient(index: number): IngredientRow {
-  return { id: `ingredient-${index}`, itemName: "", quantity: "", unit: "" };
+function emptyIngredient(rowKey: string): IngredientRow {
+  return { ingredientId: "", itemName: "", notes: "", quantity: "", rowKey, unit: "" };
 }
 
-function initialIngredients(ingredients: RecipeFormIngredient[] = []): IngredientRow[] {
-  const rows = ingredients.map((ingredient, index) => ({ ...ingredient, id: `ingredient-${index}` }));
+function initialIngredients(
+  ingredients: RecipeFormIngredient[] = [],
+  keyPrefix = "initial",
+): IngredientRow[] {
+  const rows = ingredients.map((ingredient, index) => ({
+    ingredientId: ingredient.id ?? "",
+    itemName: ingredient.itemName,
+    notes: ingredient.notes ?? "",
+    quantity: ingredient.quantity,
+    rowKey: `${keyPrefix}-${index}`,
+    unit: ingredient.unit,
+  }));
+
   return [
     ...rows,
-    ...Array.from({ length: Math.max(minimumIngredientRows - rows.length, 0) }, (_, index) => emptyIngredient(rows.length + index)),
+    ...Array.from(
+      { length: Math.max(MINIMUM_INGREDIENT_ROWS - rows.length, 0) },
+      (_, index) => emptyIngredient(`${keyPrefix}-empty-${rows.length + index}`),
+    ),
   ];
 }
 
@@ -49,11 +72,7 @@ function SubmitButton() {
   const { pending } = useFormStatus();
 
   return (
-    <button
-      className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-      disabled={pending}
-      type="submit"
-    >
+    <button className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={pending} type="submit">
       {pending ? "Saving recipe…" : "Save recipe"}
     </button>
   );
@@ -83,38 +102,31 @@ export function RecipeForm({ initialRecipe, submitAction = createRecipe }: Recip
       setServings(imported.servings === null ? "" : String(imported.servings));
       setInstructions(imported.instructions);
       setIngestionStatus(imported.ingestionStatus);
-      setIngredients(() => {
-        const importedRows = imported.ingredients.map((ingredient, index) => ({
-          id: `ingredient-${index}`,
-          itemName: ingredient.itemName,
-          quantity: ingredient.quantity === null ? "" : String(ingredient.quantity),
-          unit: ingredient.unit ?? "",
-        }));
-        const requiredEmptyRows = Math.max(minimumIngredientRows - importedRows.length, 0);
-        return [
-          ...importedRows,
-          ...Array.from({ length: requiredEmptyRows }, (_, index) => emptyIngredient(importedRows.length + index)),
-        ];
-      });
+      setIngredients(() => initialIngredients(imported.ingredients.map((ingredient) => ({
+        itemName: ingredient.itemName,
+        notes: ingredient.notes,
+        quantity: ingredient.quantity === null ? "" : String(ingredient.quantity),
+        unit: ingredient.unit ?? "",
+      })), "imported"));
     }
 
     window.addEventListener(RECIPE_INGESTED_EVENT, applyImportedRecipe);
     return () => window.removeEventListener(RECIPE_INGESTED_EVENT, applyImportedRecipe);
   }, []);
 
-  function updateIngredient(id: string, field: keyof Omit<IngredientRow, "id">, value: string) {
+  function updateIngredient(rowKey: string, field: "itemName" | "notes" | "quantity" | "unit", value: string) {
     markManualAfterReviewEdit();
-    setIngredients((rows) => rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+    setIngredients((rows) => rows.map((row) => (row.rowKey === rowKey ? { ...row, [field]: value } : row)));
   }
 
   function addIngredient() {
     markManualAfterReviewEdit();
-    setIngredients((rows) => [...rows, emptyIngredient(rows.length)]);
+    setIngredients((rows) => [...rows, emptyIngredient(`added-${crypto.randomUUID()}`)]);
   }
 
-  function removeIngredient(id: string) {
+  function removeIngredient(rowKey: string) {
     markManualAfterReviewEdit();
-    setIngredients((rows) => (rows.length > minimumIngredientRows ? rows.filter((row) => row.id !== id) : rows));
+    setIngredients((rows) => rows.length > MINIMUM_INGREDIENT_ROWS ? rows.filter((row) => row.rowKey !== rowKey) : rows);
   }
 
   return (
@@ -148,30 +160,43 @@ export function RecipeForm({ initialRecipe, submitAction = createRecipe }: Recip
 
       <fieldset className="space-y-3">
         <legend className="text-lg font-semibold text-slate-950">Ingredients</legend>
-        <p className="text-sm text-slate-600">Add quantities and units where known. Blank rows are ignored.</p>
+        <p className="text-sm text-slate-600">Add quantities and units where known. Keep imported notes, and review any unsupported unit before saving. Blank rows are ignored.</p>
         <div className="space-y-3">
-          {ingredients.map((ingredient, index) => (
-            <div className="grid gap-2 sm:grid-cols-[1fr_9rem_8rem_auto]" key={ingredient.id}>
-              <label className="text-sm text-slate-800">
-                <span className="sr-only">Ingredient {index + 1} name</span>
-                <input className="w-full rounded-md border border-slate-300 px-3 py-2" name="ingredientName" onChange={(event) => updateIngredient(ingredient.id, "itemName", event.target.value)} placeholder="Ingredient" value={ingredient.itemName} />
-              </label>
-              <label className="text-sm text-slate-800">
-                <span className="sr-only">Ingredient {index + 1} quantity</span>
-                <input className="w-full rounded-md border border-slate-300 px-3 py-2" min="0" name="ingredientQuantity" onChange={(event) => updateIngredient(ingredient.id, "quantity", event.target.value)} placeholder="Quantity" step="any" type="number" value={ingredient.quantity} />
-              </label>
-              <label className="text-sm text-slate-800">
-                <span className="sr-only">Ingredient {index + 1} unit</span>
-                <select className="w-full rounded-md border border-slate-300 bg-white px-3 py-2" name="ingredientUnit" onChange={(event) => updateIngredient(ingredient.id, "unit", event.target.value)} value={ingredient.unit}>
-                  <option value="">Unit</option>
-                  {SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
-                </select>
-              </label>
-              <button className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={ingredients.length <= minimumIngredientRows} onClick={() => removeIngredient(ingredient.id)} type="button">
-                Remove
-              </button>
-            </div>
-          ))}
+          {ingredients.map((ingredient, index) => {
+            const unsupportedUnit = ingredient.unit !== "" && !supportedUnitSet.has(ingredient.unit);
+            return (
+              <fieldset className="rounded-md border border-slate-200 p-3" key={ingredient.rowKey}>
+                <legend className="sr-only">Ingredient {index + 1}</legend>
+                <input name="ingredientId" type="hidden" value={ingredient.ingredientId} />
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_9rem_auto]">
+                  <label className="text-sm text-slate-800">
+                    <span className="sr-only">Ingredient {index + 1} name</span>
+                    <input className="w-full rounded-md border border-slate-300 px-3 py-2" name="ingredientName" onChange={(event) => updateIngredient(ingredient.rowKey, "itemName", event.target.value)} placeholder="Ingredient" value={ingredient.itemName} />
+                  </label>
+                  <label className="text-sm text-slate-800">
+                    <span className="sr-only">Ingredient {index + 1} quantity</span>
+                    <input className="w-full rounded-md border border-slate-300 px-3 py-2" min="0" name="ingredientQuantity" onChange={(event) => updateIngredient(ingredient.rowKey, "quantity", event.target.value)} placeholder="Quantity" step="any" type="number" value={ingredient.quantity} />
+                  </label>
+                  <label className="text-sm text-slate-800">
+                    <span className="sr-only">Ingredient {index + 1} unit</span>
+                    <select aria-describedby={unsupportedUnit ? `${ingredient.rowKey}-unit-review` : undefined} className="w-full rounded-md border border-slate-300 bg-white px-3 py-2" name="ingredientUnit" onChange={(event) => updateIngredient(ingredient.rowKey, "unit", event.target.value)} value={ingredient.unit}>
+                      <option value="">Unit</option>
+                      {unsupportedUnit ? <option value={ingredient.unit}>Review: {ingredient.unit}</option> : null}
+                      {SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                    </select>
+                  </label>
+                  <button className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={ingredients.length <= MINIMUM_INGREDIENT_ROWS} onClick={() => removeIngredient(ingredient.rowKey)} type="button">Remove</button>
+                </div>
+                {unsupportedUnit ? (
+                  <p className="mt-2 text-xs text-amber-800" id={`${ingredient.rowKey}-unit-review`} role="status">“{ingredient.unit}” is not a supported unit. Choose a supported unit or clear it after reviewing the ingredient.</p>
+                ) : null}
+                <label className="mt-2 block text-sm text-slate-800">
+                  <span className="font-medium">Ingredient {index + 1} notes <span className="font-normal text-slate-500">(optional)</span></span>
+                  <input className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" name="ingredientNotes" onChange={(event) => updateIngredient(ingredient.rowKey, "notes", event.target.value)} placeholder="Preparation, condition, or imported detail" value={ingredient.notes} />
+                </label>
+              </fieldset>
+            );
+          })}
         </div>
         <button className="rounded-md border border-emerald-700 px-3 py-2 text-sm font-medium text-emerald-800" onClick={addIngredient} type="button">Add ingredient</button>
       </fieldset>

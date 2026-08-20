@@ -1,6 +1,2 @@
-insert into public.shopping_providers (code, name, enabled)
-values
-  ('coles', 'Coles', false),
-  ('woolworths', 'Woolworths', false),
-  ('generic', 'Generic grocery export', false)
-on conflict (code) do nothing;
+-- No baseline application data is required. Auth signup creates each user's
+-- household and default Dinner slot transactionally.

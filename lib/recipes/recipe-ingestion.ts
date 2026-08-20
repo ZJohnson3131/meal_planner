@@ -1,25 +1,34 @@
 import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
 
-import { parseIngredientLine, type ParsedIngredient } from "@/lib/recipes/parse-ingredient-line";
+import {
+  assertRecipeImportTime,
+  createRecipeImportBudget,
+  RECIPE_IMPORT_LIMITS,
+  sanitizeRecipeUrl,
+  type RecipeImportBudget,
+  type RecipeImportData,
+  type RecipeImportIngredient,
+} from "@/lib/recipes/recipe-import-contract";
+import { parseIngredientLineForReview } from "@/lib/recipes/parse-ingredient-line";
+import { fetchRecipeHtml } from "@/lib/recipes/safe-recipe-fetch";
 
-const MAX_HTML_LENGTH = 1_000_000;
-const MAX_JSON_LD_SCRIPTS = 50;
-const MAX_JSON_LD_SCRIPT_LENGTH = 200_000;
-const MAX_INGREDIENTS = 500;
-const MAX_TEXT_LENGTH = 100_000;
-const MAX_SECTION_TEXT_LENGTH = 20_000;
+export type ParsedRecipe = RecipeImportData;
 
-export type ParsedRecipe = {
-  title: string;
-  sourceUrl: string;
-  servings: number | null;
-  ingredients: ParsedIngredient[];
-  instructions: string;
-  ingestionStatus: "parsed" | "needs_review" | "failed";
+type ParsedIngredients = {
+  ingredients: RecipeImportIngredient[];
+  reviewRequired: boolean;
 };
 
-function plainText(value: unknown, maxLength = MAX_TEXT_LENGTH): string {
+type SemanticRecipe = {
+  recipe: ParsedRecipe;
+  ingredientReviewRequired: boolean;
+};
+
+function plainText(
+  value: unknown,
+  maxLength: number = RECIPE_IMPORT_LIMITS.instructionsCharacters,
+): string {
   if (typeof value !== "string") return "";
 
   // Cheerio decodes entities and strips markup without evaluating page scripts.
@@ -33,18 +42,21 @@ function plainText(value: unknown, maxLength = MAX_TEXT_LENGTH): string {
 }
 
 function sourceUrlOrEmpty(value: string): string {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : "";
-  } catch {
-    return "";
-  }
+  return sanitizeRecipeUrl(value) ?? "";
 }
 
-function flattenJsonLd(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+function flattenJsonLd(value: unknown, depth = 0): unknown[] {
+  if (depth >= RECIPE_IMPORT_LIMITS.jsonLdDepth) return [];
+  if (Array.isArray(value)) {
+    const nodes: unknown[] = [];
+    for (const child of value) {
+      nodes.push(...flattenJsonLd(child, depth + 1));
+      if (nodes.length >= RECIPE_IMPORT_LIMITS.jsonLdNodes) break;
+    }
+    return nodes.slice(0, RECIPE_IMPORT_LIMITS.jsonLdNodes);
+  }
   if (value && typeof value === "object" && "@graph" in value) {
-    return flattenJsonLd((value as { "@graph": unknown })["@graph"]);
+    return flattenJsonLd((value as { "@graph": unknown })["@graph"], depth + 1);
   }
   return [value];
 }
@@ -58,7 +70,7 @@ function isRecipe(node: unknown): node is Record<string, unknown> {
 }
 
 function parseServings(raw: unknown): number | null {
-  const text = plainText(Array.isArray(raw) ? raw[0] : raw, 200);
+  const text = plainText(Array.isArray(raw) ? raw[0] : raw, RECIPE_IMPORT_LIMITS.labelCharacters);
   const match = text.match(/\d+(?:\.\d+)?/);
   if (!match) return null;
 
@@ -66,19 +78,37 @@ function parseServings(raw: unknown): number | null {
   return Number.isFinite(servings) && servings > 0 ? servings : null;
 }
 
-function instructionText(value: unknown): string[] {
+function instructionText(value: unknown, depth = 0): string[] {
+  if (depth >= RECIPE_IMPORT_LIMITS.jsonLdDepth) return [];
   if (typeof value === "string") return [plainText(value)];
-  if (Array.isArray(value)) return value.flatMap(instructionText);
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, RECIPE_IMPORT_LIMITS.jsonLdNodes)
+      .flatMap((child) => instructionText(child, depth + 1));
+  }
   if (value && typeof value === "object") {
     const node = value as Record<string, unknown>;
-    return instructionText(node.text ?? node.name ?? node.itemListElement);
+    return instructionText(node.text ?? node.name ?? node.itemListElement, depth + 1);
   }
   return [];
 }
 
+function parseIngredientLines(lines: string[]): ParsedIngredients {
+  const parsedLines = lines
+    .slice(0, RECIPE_IMPORT_LIMITS.ingredients)
+    .map((line) => parseIngredientLineForReview(line));
+
+  return {
+    ingredients: parsedLines
+      .map(({ ingredient }) => ingredient)
+      .filter((ingredient) => ingredient.itemName.length > 0),
+    reviewRequired: parsedLines.some(({ reviewRequired }) => reviewRequired),
+  };
+}
+
 function sectionHeading($: cheerio.CheerioAPI, names: string[]): cheerio.Cheerio<AnyNode> {
   return $("h2, h3, h4, h5, h6, [role='heading']").filter((_, element) => {
-    const label = plainText($(element).text(), 200).toLowerCase();
+    const label = plainText($(element).text(), RECIPE_IMPORT_LIMITS.labelCharacters).toLowerCase();
     return names.some((name) => label === name || label.startsWith(`${name} `) || label.startsWith(`${name}:`));
   }).first();
 }
@@ -108,25 +138,33 @@ function sectionListText(
   return list
     .find("li")
     .toArray()
-    .slice(0, MAX_INGREDIENTS)
-    .map((item) => plainText($(item).text(), 2_000).replace(/^step\s+\d+\s*/i, ""))
+    .slice(0, RECIPE_IMPORT_LIMITS.ingredients)
+    .map((item) => plainText($(item).text(), RECIPE_IMPORT_LIMITS.ingredientLineCharacters).replace(/^step\s+\d+\s*/i, ""))
     .filter(Boolean);
 }
 
-function semanticRecipe(html: string, sourceUrl: string): ParsedRecipe {
-  const $ = cheerio.load(html);
+function semanticRecipe(
+  $: cheerio.CheerioAPI,
+  sourceUrl: string,
+  budget?: RecipeImportBudget,
+): SemanticRecipe {
+  if (budget) assertRecipeImportTime(budget);
   $("script, style, noscript, template, svg").remove();
-  const title = plainText($("h1").first().text(), 500)
-    || plainText($("title").first().text(), 500)
+  const title = plainText($("h1").first().text(), RECIPE_IMPORT_LIMITS.titleCharacters)
+    || plainText($("title").first().text(), RECIPE_IMPORT_LIMITS.titleCharacters)
     || "Untitled recipe";
   const ingredientLines = sectionListText($, sectionHeading($, ["ingredients"]));
+  const parsedIngredients = parseIngredientLines(ingredientLines);
   const methodLines = sectionListText($, sectionHeading($, ["method", "instructions", "directions", "preparation"]));
   const servingCandidates = [
     ...$("[data-testid*='serv' i], [class*='serv' i], [aria-label*='serv' i]")
       .toArray()
-      .slice(0, 20)
-      .map((element) => plainText($(element).text() || $(element).attr("aria-label"), 200)),
-    plainText($("article").first().text() || $("body").text(), MAX_SECTION_TEXT_LENGTH),
+      .slice(0, RECIPE_IMPORT_LIMITS.servingCandidates)
+      .map((element) => plainText(
+        $(element).text() || $(element).attr("aria-label"),
+        RECIPE_IMPORT_LIMITS.labelCharacters,
+      )),
+    plainText($("article").first().text() || $("body").text(), RECIPE_IMPORT_LIMITS.sectionTextCharacters),
   ];
   const servings = servingCandidates
     .map((candidate) => candidate.match(/(?:serves?|servings?|makes?|yield)\s*:?\s*(\d+(?:\.\d+)?)/i)
@@ -134,24 +172,35 @@ function semanticRecipe(html: string, sourceUrl: string): ParsedRecipe {
     .map((match) => (match ? Number(match[1]) : null))
     .find((value): value is number => value !== null && Number.isFinite(value) && value > 0) ?? null;
 
+  if (budget) assertRecipeImportTime(budget);
   return {
-    title,
-    sourceUrl,
-    servings,
-    ingredients: ingredientLines.map((line) => parseIngredientLine(line)).filter((ingredient) => ingredient.itemName.length > 0),
-    instructions: methodLines.join("\n\n").slice(0, MAX_TEXT_LENGTH),
-    ingestionStatus: "needs_review",
+    recipe: {
+      title,
+      sourceUrl,
+      servings,
+      ingredients: parsedIngredients.ingredients,
+      instructions: methodLines.join("\n\n").slice(0, RECIPE_IMPORT_LIMITS.instructionsCharacters),
+      ingestionStatus: "needs_review",
+    },
+    ingredientReviewRequired: parsedIngredients.reviewRequired,
   };
 }
 
-function fallbackRecipe(html: string, sourceUrl: string): ParsedRecipe {
-  const semantic = semanticRecipe(html, sourceUrl);
-  const complete = semantic.title !== "Untitled recipe"
-    && semantic.ingredients.length > 0
-    && semantic.instructions.length > 0;
+function fallbackRecipe(
+  html: string,
+  sourceUrl: string,
+  budget?: RecipeImportBudget,
+): ParsedRecipe {
+  if (budget) assertRecipeImportTime(budget);
+  const $ = cheerio.load(html);
+  if (budget) assertRecipeImportTime(budget);
+  const semantic = semanticRecipe($, sourceUrl, budget);
+  const complete = semantic.recipe.title !== "Untitled recipe"
+    && semantic.recipe.ingredients.length > 0
+    && semantic.recipe.instructions.length > 0;
   return {
-    ...semantic,
-    ingestionStatus: complete ? "parsed" : "needs_review",
+    ...semantic.recipe,
+    ingestionStatus: complete && !semantic.ingredientReviewRequired ? "parsed" : "needs_review",
   };
 }
 
@@ -160,51 +209,70 @@ function fallbackRecipe(html: string, sourceUrl: string): ParsedRecipe {
  * semantic recipe headings/lists. Returned strings are plain text and remain
  * user-editable; incomplete results are deliberately marked `needs_review`.
  */
-export function parseRecipeHtml(html: string, sourceUrl: string): ParsedRecipe {
+export function parseRecipeHtml(
+  html: string,
+  sourceUrl: string,
+  budget?: RecipeImportBudget,
+): ParsedRecipe {
+  if (budget) assertRecipeImportTime(budget);
   const safeSourceUrl = sourceUrlOrEmpty(sourceUrl);
-  if (typeof html !== "string" || html.length === 0 || html.length > MAX_HTML_LENGTH) {
-    return fallbackRecipe("", safeSourceUrl);
+  if (
+    typeof html !== "string"
+    || html.length === 0
+    || Buffer.byteLength(html, "utf8") > RECIPE_IMPORT_LIMITS.htmlBytes
+  ) {
+    return fallbackRecipe("", safeSourceUrl, budget);
   }
 
   const $ = cheerio.load(html);
+  if (budget) assertRecipeImportTime(budget);
   const nodes: unknown[] = [];
   $("script[type='application/ld+json']")
     .toArray()
-    .slice(0, MAX_JSON_LD_SCRIPTS)
+    .slice(0, RECIPE_IMPORT_LIMITS.jsonLdScripts)
     .forEach((script) => {
+      if (budget) assertRecipeImportTime(budget);
       const json = $(script).text();
-      if (!json || json.length > MAX_JSON_LD_SCRIPT_LENGTH) return;
+      if (!json || json.length > RECIPE_IMPORT_LIMITS.jsonLdScriptCharacters) return;
 
       try {
-        nodes.push(...flattenJsonLd(JSON.parse(json)));
+        nodes.push(...flattenJsonLd(JSON.parse(json)).slice(
+          0,
+          Math.max(0, RECIPE_IMPORT_LIMITS.jsonLdNodes - nodes.length),
+        ));
       } catch {
         // A malformed metadata block must not prevent the manual-review path.
       }
     });
 
   const recipe = nodes.find(isRecipe);
-  if (!recipe) return fallbackRecipe(html, safeSourceUrl);
+  if (!recipe) return fallbackRecipe(html, safeSourceUrl, budget);
 
-  const semantic = semanticRecipe(html, safeSourceUrl);
+  const semantic = semanticRecipe($, safeSourceUrl, budget);
 
-  const title = plainText(recipe.name, 500) || "Untitled recipe";
-  const ingredients = Array.isArray(recipe.recipeIngredient)
-    ? recipe.recipeIngredient
-        .slice(0, MAX_INGREDIENTS)
-        .map((line) => parseIngredientLine(plainText(String(line), 2_000)))
-        .filter((ingredient) => ingredient.itemName.length > 0)
-    : [];
+  const title = plainText(recipe.name, RECIPE_IMPORT_LIMITS.titleCharacters) || "Untitled recipe";
+  const parsedIngredients = parseIngredientLines(
+    Array.isArray(recipe.recipeIngredient)
+      ? recipe.recipeIngredient.map((line) => plainText(String(line), RECIPE_IMPORT_LIMITS.ingredientLineCharacters))
+      : [],
+  );
   const instructions = instructionText(recipe.recipeInstructions)
     .filter(Boolean)
     .join("\n\n")
-    .slice(0, MAX_TEXT_LENGTH);
-  const resolvedTitle = title !== "Untitled recipe" ? title : semantic.title;
-  const resolvedIngredients = ingredients.length > 0 ? ingredients : semantic.ingredients;
-  const resolvedInstructions = instructions || semantic.instructions;
-  const resolvedServings = parseServings(recipe.recipeYield) ?? semantic.servings;
+    .slice(0, RECIPE_IMPORT_LIMITS.instructionsCharacters);
+  const resolvedTitle = title !== "Untitled recipe" ? title : semantic.recipe.title;
+  const resolvedIngredients = parsedIngredients.ingredients.length > 0
+    ? parsedIngredients.ingredients
+    : semantic.recipe.ingredients;
+  const resolvedInstructions = instructions || semantic.recipe.instructions;
+  const resolvedServings = parseServings(recipe.recipeYield) ?? semantic.recipe.servings;
+  const ingredientReviewRequired = parsedIngredients.ingredients.length > 0
+    ? parsedIngredients.reviewRequired
+    : semantic.ingredientReviewRequired;
   const complete = resolvedTitle !== "Untitled recipe"
     && resolvedIngredients.length > 0
     && resolvedInstructions.length > 0;
+  if (budget) assertRecipeImportTime(budget);
 
   return {
     title: resolvedTitle,
@@ -212,6 +280,19 @@ export function parseRecipeHtml(html: string, sourceUrl: string): ParsedRecipe {
     servings: resolvedServings,
     ingredients: resolvedIngredients,
     instructions: resolvedInstructions,
-    ingestionStatus: complete ? "parsed" : "needs_review",
+    ingestionStatus: complete && !ingredientReviewRequired ? "parsed" : "needs_review",
   };
+}
+
+/**
+ * Fetches and parses a recipe within one aggregate DNS/network/parser budget.
+ * Route handlers should use this entry point instead of pre-validating the URL,
+ * which would repeat DNS resolution without reusing the pinned address.
+ */
+export async function ingestRecipeUrl(
+  sourceUrl: string,
+  budget: RecipeImportBudget = createRecipeImportBudget(),
+): Promise<ParsedRecipe> {
+  const fetched = await fetchRecipeHtml(sourceUrl, budget);
+  return parseRecipeHtml(fetched.html, fetched.finalUrl, budget);
 }

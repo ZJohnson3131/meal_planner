@@ -1,11 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { requireHousehold } from "@/lib/auth/household";
 import { createClient } from "@/lib/supabase/server";
-import { pantryItemSchema } from "@/lib/validation/pantry";
+import {
+  pantryItemSchema,
+  pantryItemVersionSchema,
+} from "@/lib/validation/pantry";
 
 const pantryItemIdSchema = z.string().uuid();
 
@@ -30,43 +34,20 @@ function parsePantryItem(formData: FormData) {
 }
 
 async function insertPantryItem(formData: FormData) {
-  const { householdId } = await requireHousehold();
   const parsedItem = parsePantryItem(formData);
   if (!parsedItem.success) {
     throw new Error("Pantry item details are invalid");
   }
 
+  const { householdId } = await requireHousehold();
   const supabase = await createClient();
-  let existingItemQuery = supabase
-    .from("pantry_items")
-    .select("id")
-    .eq("household_id", householdId)
-    .eq("item_name", parsedItem.data.itemName)
-    .eq("quantity", parsedItem.data.quantity)
-    .eq("unit", parsedItem.data.unit);
-
-  existingItemQuery = parsedItem.data.category
-    ? existingItemQuery.eq("category", parsedItem.data.category)
-    : existingItemQuery.is("category", null);
-  existingItemQuery = parsedItem.data.expiryDate
-    ? existingItemQuery.eq("expiry_date", parsedItem.data.expiryDate)
-    : existingItemQuery.is("expiry_date", null);
-
-  const { data: existingItems, error: existingItemError } = await existingItemQuery.limit(1);
-  if (existingItemError) {
-    throw new Error("Failed to check existing pantry items");
-  }
-  if (existingItems?.length) {
-    return;
-  }
-
-  const { error } = await supabase.from("pantry_items").insert({
-    household_id: householdId,
-    item_name: parsedItem.data.itemName,
-    quantity: parsedItem.data.quantity,
-    unit: parsedItem.data.unit,
-    category: parsedItem.data.category ?? null,
-    expiry_date: parsedItem.data.expiryDate ?? null,
+  const { error } = await supabase.rpc("create_pantry_item", {
+    p_category: parsedItem.data.category,
+    p_expiry_date: parsedItem.data.expiryDate,
+    p_household_id: householdId,
+    p_item_name: parsedItem.data.itemName,
+    p_quantity: parsedItem.data.quantity,
+    p_unit: parsedItem.data.unit,
   });
 
   if (error) {
@@ -98,7 +79,8 @@ export async function createPantryItem(
   try {
     await insertPantryItem(submittedFormData);
     return { error: null, success: true };
-  } catch {
+  } catch (error) {
+    unstable_rethrow(error);
     return {
       error: "We could not add this pantry item. Check the details and try again.",
       success: false,
@@ -108,30 +90,27 @@ export async function createPantryItem(
 
 /** Updates an inventory item only when it belongs to the active household. */
 export async function updatePantryItem(formData: FormData) {
-  const { householdId } = await requireHousehold();
   const parsedId = pantryItemIdSchema.safeParse(formData.get("id"));
+  const parsedVersion = pantryItemVersionSchema.safeParse(formData.get("version"));
   const parsedItem = parsePantryItem(formData);
-  if (!parsedId.success || !parsedItem.success) {
+  if (!parsedId.success || !parsedVersion.success || !parsedItem.success) {
     throw new Error("Pantry item details are invalid");
   }
 
+  await requireHousehold();
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("pantry_items")
-    .update({
-      item_name: parsedItem.data.itemName,
-      quantity: parsedItem.data.quantity,
-      unit: parsedItem.data.unit,
-      category: parsedItem.data.category ?? null,
-      expiry_date: parsedItem.data.expiryDate ?? null,
-    })
-    .eq("id", parsedId.data)
-    .eq("household_id", householdId)
-    .select("id")
-    .maybeSingle();
+  const { error } = await supabase.rpc("update_pantry_item", {
+    p_category: parsedItem.data.category,
+    p_expected_version: parsedVersion.data,
+    p_expiry_date: parsedItem.data.expiryDate,
+    p_item_id: parsedId.data,
+    p_item_name: parsedItem.data.itemName,
+    p_quantity: parsedItem.data.quantity,
+    p_unit: parsedItem.data.unit,
+  });
 
-  if (error || !data) {
-    throw new Error("Failed to update pantry item");
+  if (error) {
+    throw new Error("We could not update that pantry item. Refresh the pantry and try again.");
   }
 
   revalidatePath("/pantry");
@@ -139,23 +118,21 @@ export async function updatePantryItem(formData: FormData) {
 
 /** Deletes an inventory item only when it belongs to the active household. */
 export async function deletePantryItem(formData: FormData) {
-  const { householdId } = await requireHousehold();
   const parsedId = pantryItemIdSchema.safeParse(formData.get("id"));
-  if (!parsedId.success) {
+  const parsedVersion = pantryItemVersionSchema.safeParse(formData.get("version"));
+  if (!parsedId.success || !parsedVersion.success) {
     throw new Error("Pantry item identifier is invalid");
   }
 
+  await requireHousehold();
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("pantry_items")
-    .delete()
-    .eq("id", parsedId.data)
-    .eq("household_id", householdId)
-    .select("id")
-    .maybeSingle();
+  const { error } = await supabase.rpc("delete_pantry_item", {
+    p_expected_version: parsedVersion.data,
+    p_item_id: parsedId.data,
+  });
 
-  if (error || !data) {
-    throw new Error("Failed to delete pantry item");
+  if (error) {
+    throw new Error("We could not delete that pantry item. Refresh the pantry and try again.");
   }
 
   revalidatePath("/pantry");

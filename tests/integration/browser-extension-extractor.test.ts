@@ -2,22 +2,35 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, test } from "vitest";
 
-type ExtractDraft = () => {
+type ImportProtocol = {
+  recipeImportVersion: number;
+  limits: Record<string, number>;
+};
+
+type ExtractDraft = (protocol: ImportProtocol) => {
+  recipeImportVersion: number;
   title: string;
   servings: number | null;
   ingredients: Array<{ itemName: string }>;
   instructions: string;
 };
 
-async function loadInjectedExtractor(): Promise<ExtractDraft> {
+async function loadInjectedExtractor(): Promise<{
+  extract: ExtractDraft;
+  protocol: ImportProtocol;
+}> {
   const source = await readFile(resolve(process.cwd(), "browser-extension/background.js"), "utf8");
-  const match = source.match(/function extractRecipeDraft\(\) \{[\s\S]*?\r?\n\}\r?\n\r?\nfunction encodeDraft/);
-  if (!match) throw new Error("Could not locate injected extractor");
-  const extractorSource = match[0].replace(/\r?\n\r?\nfunction encodeDraft$/, "");
-  const factory = new Function("document", "location", `${extractorSource}; return extractRecipeDraft;`) as (
+  const match = source.match(/const RECIPE_IMPORT_PROTOCOL = Object\.freeze\([\s\S]*?\r?\n\}\r?\n\r?\nfunction encodeDraft/);
+  if (!match) throw new Error("Could not locate injected extractor and protocol contract");
+  const injectedSource = match[0].replace(/\r?\n\r?\nfunction encodeDraft$/, "");
+  const factory = new Function(
+    "document",
+    "location",
+    `${injectedSource}; return { extract: extractRecipeDraft, protocol: RECIPE_IMPORT_PROTOCOL };`,
+  ) as (
     document: Document,
     location: Location,
-  ) => ExtractDraft;
+  ) => { extract: ExtractDraft; protocol: ImportProtocol };
   return factory(document, window.location);
 }
 
@@ -41,9 +54,10 @@ describe("browser extension visible-DOM extractor", () => {
         </div>
       </article></main>`;
 
-    const extract = await loadInjectedExtractor();
-    const draft = extract();
+    const { extract, protocol } = await loadInjectedExtractor();
+    const draft = extract(protocol);
 
+    expect(draft.recipeImportVersion).toBe(protocol.recipeImportVersion);
     expect(draft.title).toBe("Creamy French onion chicken pasta bake");
     expect(draft.servings).toBe(4);
     expect(draft.ingredients.map((ingredient) => ingredient.itemName)).toEqual([

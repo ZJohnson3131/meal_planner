@@ -18,7 +18,7 @@ export default async function EditRecipePage({ params }: { params: Promise<{ id:
   const supabase = await createClient();
   const { data: recipe, error } = await supabase
     .from("recipes")
-    .select("id, title, source_url, favorite, servings, instructions, ingestion_status, recipe_ingredients(item_name, quantity, unit, display_order)")
+    .select("id, title, source_url, favorite, servings, instructions, ingestion_status, recipe_ingredients(id, item_name, quantity, unit, notes, display_order)")
     .eq("id", recipeId.data)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -29,7 +29,9 @@ export default async function EditRecipePage({ params }: { params: Promise<{ id:
   const ingredients = [...(recipe.recipe_ingredients ?? [])]
     .sort((first, second) => first.display_order - second.display_order)
     .map((ingredient) => ({
+      id: ingredient.id,
       itemName: ingredient.item_name,
+      notes: ingredient.notes ?? "",
       quantity: ingredient.quantity === null ? "" : String(ingredient.quantity),
       unit: ingredient.unit ?? "",
     }));

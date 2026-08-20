@@ -46,6 +46,7 @@ describe("recipe URL review flow", () => {
   test("prefills the editable recipe form after importing a parsed recipe", async () => {
     const user = userEvent.setup();
     const importedRecipe = {
+      recipeImportVersion: 1 as const,
       title: "Weeknight pasta",
       sourceUrl: "https://recipes.example/weeknight-pasta",
       servings: 4,
@@ -89,6 +90,7 @@ describe("recipe URL review flow", () => {
     expect(screen.getByLabelText("Ingredient 1 quantity")).toHaveValue(400);
     expect(screen.getByLabelText("Ingredient 1 unit")).toHaveValue("g");
     expect(screen.getByLabelText("Ingredient 2 name")).toHaveValue("Tomato");
+    expect(screen.getByLabelText("Ingredient 2 notes (optional)")).toHaveValue("ripe");
     expect(screen.getByDisplayValue("parsed")).toHaveAttribute("name", "ingestionStatus");
   });
 
@@ -113,6 +115,7 @@ describe("recipe URL review flow", () => {
   });
 
   test("prefills a recipe edit form and sends edits to the supplied action", async () => {
+    const user = userEvent.setup();
     const saveChanges = vi.fn();
     render(
       <RecipeForm
@@ -123,7 +126,7 @@ describe("recipe URL review flow", () => {
           instructions: "Simmer.",
           favorite: true,
           ingestionStatus: "needs_review",
-          ingredients: [{ itemName: "Tomatoes", quantity: "2", unit: "can" }],
+          ingredients: [{ id: "22b6054d-3faf-456a-922d-c5fc9d7d0e6e", itemName: "Tomatoes", notes: "whole", quantity: "2", unit: "can" }],
         }}
         submitAction={saveChanges}
       />,
@@ -134,7 +137,15 @@ describe("recipe URL review flow", () => {
     expect(screen.getByLabelText("Servings")).toHaveValue(3);
     expect(screen.getByLabelText("Ingredient 1 name")).toHaveValue("Tomatoes");
     expect(screen.getByLabelText("Ingredient 1 unit")).toHaveValue("can");
+    expect(screen.getByLabelText("Ingredient 1 notes (optional)")).toHaveValue("whole");
+    expect(document.querySelector('input[name="ingredientId"]')).toHaveValue("22b6054d-3faf-456a-922d-c5fc9d7d0e6e");
     expect(screen.getByLabelText("Favorite recipe")).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Save recipe" }));
+    await waitFor(() => expect(saveChanges).toHaveBeenCalledOnce());
+    const submitted = saveChanges.mock.calls[0][0] as FormData;
+    expect(submitted.get("ingredientId")).toBe("22b6054d-3faf-456a-922d-c5fc9d7d0e6e");
+    expect(submitted.get("ingredientNotes")).toBe("whole");
   });
 
   test("shows a review warning for a successful incomplete import", async () => {
@@ -142,6 +153,7 @@ describe("recipe URL review flow", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
+        recipeImportVersion: 1,
         title: "Untitled recipe",
         sourceUrl: "https://recipes.example/incomplete",
         servings: null,

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Meal Planner Recipe Draft",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sends a bounded recipe draft from the current page to the local Meal Planner review screen.",
   "permissions": ["activeTab", "scripting"],
   "background": {

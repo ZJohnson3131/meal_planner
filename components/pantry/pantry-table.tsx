@@ -13,6 +13,7 @@ export type PantryTableItem = {
   unit: string;
   category: string | null;
   expiry_date: string | null;
+  version?: number | string;
 };
 
 type PantryTableProps = {
@@ -63,10 +64,12 @@ function PantryRow({ item }: { item: PantryTableItem }) {
         <div className="flex flex-wrap gap-2">
           <form action={updatePantryItem} id={`pantry-update-${item.id}`}>
             <input name="id" type="hidden" value={item.id} />
+            <input name="version" type="hidden" value={item.version ?? ""} />
             <SaveButton />
           </form>
           <form action={deletePantryItem} onSubmit={(event) => { if (!window.confirm(`Delete ${item.item_name} from the pantry?`)) event.preventDefault(); }}>
             <input name="id" type="hidden" value={item.id} />
+            <input name="version" type="hidden" value={item.version ?? ""} />
             <DeleteButton itemName={item.item_name} />
           </form>
         </div>

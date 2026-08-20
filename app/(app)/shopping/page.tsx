@@ -23,8 +23,6 @@ export default async function ShoppingPage() {
   let items: Array<{
     id: string;
     item_name: string;
-    required_quantity: number | null;
-    pantry_quantity: number | null;
     delta_quantity: number | null;
     unit: string | null;
     status: "needed" | "checked" | "dismissed";
@@ -36,7 +34,7 @@ export default async function ShoppingPage() {
     const { data, error } = await supabase
       .from("shopping_list_items")
       .select(
-        "id, item_name, required_quantity, pantry_quantity, delta_quantity, unit, status, review_required, review_reason",
+        "id, item_name, delta_quantity, unit, status, review_required, review_reason",
       )
       .eq("shopping_list_id", shoppingList.id)
       .order("item_name", { ascending: true });

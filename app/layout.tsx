@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -6,20 +7,17 @@ export const metadata: Metadata = {
   description: "Plan dinners, track pantry stock, and generate shopping lists.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // A fresh CSP nonce exists only for an incoming request. Keep the root
+  // dynamic so Next.js can attach that nonce to framework scripts and styles.
+  await connection();
+
   return (
-    <html
-      lang="en"
-      className="h-full antialiased"
-      style={{
-        "--font-geist-sans": "Arial, Helvetica, sans-serif",
-        "--font-geist-mono": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      } as React.CSSProperties}
-    >
+    <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

@@ -8,7 +8,7 @@ export default async function PantryPage() {
   const supabase = await createClient();
   const { data: pantryItems, error } = await supabase
     .from("pantry_items")
-    .select("id, item_name, quantity, unit, category, expiry_date")
+    .select("id, item_name, quantity, unit, category, expiry_date, version")
     .eq("household_id", householdId)
     .order("item_name", { ascending: true });
 

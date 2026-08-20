@@ -1,12 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { loadEnv } from "vite";
 
-const env = loadEnv("test", process.cwd(), "");
-const hasLocalSupabaseConfig = Boolean(
-  (env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL)
-  && (env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-  && !(env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)?.startsWith("replace-with"),
-);
+import { assertExpectedLocalSupabaseProject } from "./local-project-guard";
 
 function encodeExtensionDraft(draft: unknown) {
   // Deliberately mirrors browser-extension/background.js: UTF-8 JSON bytes,
@@ -17,16 +11,16 @@ function encodeExtensionDraft(draft: unknown) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-test.skip(!hasLocalSupabaseConfig, "requires a configured local Supabase stack");
-
 test("browser extension draft fragment renders an editable import form", async ({ page }) => {
+  assertExpectedLocalSupabaseProject();
   test.setTimeout(60_000);
   const email = `extension-import-${Date.now()}@example.test`;
   const encoded = encodeExtensionDraft({
+    recipeImportVersion: 1,
     title: "Extension lemon pasta",
     sourceUrl: "https://recipes.example/lemon-pasta",
     servings: 4,
-    ingredients: [{ itemName: "Pasta", quantity: null, unit: null, notes: null }],
+    ingredients: [{ itemName: "Pasta", quantity: null, unit: null, notes: "visible package notes" }],
     instructions: "Cook pasta and toss with lemon.",
   });
 
@@ -45,9 +39,18 @@ test("browser extension draft fragment renders an editable import form", async (
   await expect(page.getByLabel("Servings")).toHaveValue("4");
   await expect(page.getByLabel("Ingredient 1 name")).toHaveValue("Pasta");
   await expect(page.getByLabel("Ingredient 1 unit")).toHaveValue("");
+  await expect(page.getByLabel("Ingredient 1 notes (optional)")).toHaveValue("visible package notes");
   await expect(page.getByLabel("Instructions")).toHaveValue("Cook pasta and toss with lemon.");
   await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
 
   await page.getByLabel("Title").fill("Edited lemon pasta");
+  await page.getByRole("button", { name: "Save recipe" }).click();
+  await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);
+  const savedUrl = page.url();
+  await expect(page.getByRole("heading", { name: "Edited lemon pasta", exact: true })).toBeVisible();
+  await page.goto(savedUrl);
+  await expect(page.getByText("Pasta (visible package notes)", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Edit recipe" }).click();
   await expect(page.getByLabel("Title")).toHaveValue("Edited lemon pasta");
+  await expect(page.getByLabel("Ingredient 1 notes (optional)")).toHaveValue("visible package notes");
 });

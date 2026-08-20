@@ -1,5 +1,7 @@
 import "server-only";
 
+import { cache } from "react";
+
 import { requireUser } from "@/lib/auth/require-user";
 import { createClient } from "@/lib/supabase/server";
 
@@ -8,7 +10,7 @@ export type HouseholdContext = {
   householdId: string;
 };
 
-export async function requireHousehold(): Promise<HouseholdContext> {
+const getAuthenticatedHousehold = cache(async (): Promise<HouseholdContext> => {
   const user = await requireUser();
   const supabase = await createClient();
 
@@ -27,4 +29,9 @@ export async function requireHousehold(): Promise<HouseholdContext> {
     userId: user.id,
     householdId: data.household_id,
   };
+});
+
+/** Returns the authenticated household once per server request. */
+export async function requireHousehold(): Promise<HouseholdContext> {
+  return getAuthenticatedHousehold();
 }
