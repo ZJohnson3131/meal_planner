@@ -54,8 +54,8 @@ begin
   -- proposal, including any generated recipes and ingredients.
   for v_assignment in select value from jsonb_array_elements(p_assignments) loop
     if jsonb_typeof(v_assignment) <> 'object'
-      or (v_assignment - array['plannedFor', 'recipeId', 'generatedRecipe']) <> '{}'::jsonb
-      or not (v_assignment ?& array['plannedFor', 'recipeId', 'generatedRecipe'])
+      or (v_assignment - ARRAY['plannedFor', 'recipeId', 'generatedRecipe']::text[]) <> '{}'::jsonb
+      or not (v_assignment ?& ARRAY['plannedFor', 'recipeId', 'generatedRecipe']::text[])
       or jsonb_typeof(v_assignment->'plannedFor') <> 'string'
       or jsonb_typeof(v_assignment->'recipeId') not in ('string', 'null')
       or jsonb_typeof(v_assignment->'generatedRecipe') not in ('object', 'null') then
@@ -63,7 +63,7 @@ begin
     end if;
 
     v_assignment_date := v_assignment->>'plannedFor';
-    if v_assignment_date !~ '^\\d{4}-\\d{2}-\\d{2}$' then
+    if v_assignment_date !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
       raise exception using errcode = '22023', message = 'assignment date is invalid';
     end if;
     begin
@@ -97,8 +97,8 @@ begin
     else
       v_recipe := v_assignment->'generatedRecipe'->'recipe';
       v_ingredients := v_assignment->'generatedRecipe'->'ingredients';
-      if (v_assignment->'generatedRecipe' - array['recipe', 'ingredients']) <> '{}'::jsonb
-        or not (v_assignment->'generatedRecipe' ?& array['recipe', 'ingredients']) then
+      if ((v_assignment->'generatedRecipe') - ARRAY['recipe', 'ingredients']::text[]) <> '{}'::jsonb
+        or not ((v_assignment->'generatedRecipe') ?& ARRAY['recipe', 'ingredients']::text[]) then
         raise exception using errcode = '22023', message = 'generated recipe payload is invalid';
       end if;
       -- Delegate exact metadata, source URL, ingredient, and database-limit

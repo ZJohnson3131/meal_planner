@@ -186,6 +186,21 @@ async function createRaceFixture(plannedFor: string, itemName: string) {
   return { entryId: entry.data as string, recipeId: raceRecipeId };
 }
 
+function generatedRecipe(title: string) {
+  return {
+    ingredients: [{ itemName: "Weekly plan ingredient", notes: null, quantity: 1, unit: "each" }],
+    recipe: {
+      description: null,
+      favorite: false,
+      ingestionStatus: "manual",
+      instructions: "Cook the weekly plan recipe.",
+      servings: 2,
+      sourceUrl: null,
+      title,
+    },
+  };
+}
+
 beforeAll(async () => {
   assertExpectedLocalProject();
   admin = createClient(apiUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
@@ -266,6 +281,101 @@ describe.sequential("explicit local Supabase security and integrity suite", () =
       p_deductions: [],
     });
     expect(legacy.error).not.toBeNull();
+  });
+
+  test("confirms saved and generated weekly dinners atomically for the caller household", async () => {
+    const generatedTitle = `Confirmed weekly generated recipe ${crypto.randomUUID()}`;
+    const result = await owner.rpc("confirm_weekly_dinner_plan", {
+      p_assignments: [
+        { generatedRecipe: null, plannedFor: "2035-01-01", recipeId },
+        { generatedRecipe: generatedRecipe(generatedTitle), plannedFor: "2035-01-02", recipeId: null },
+      ],
+      p_household_id: ownerHouseholdId,
+      p_week_start: "2035-01-01",
+    });
+    expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(2);
+
+    const { data: generated, error: generatedError } = await owner.from("recipes")
+      .select("id").eq("title", generatedTitle).single();
+    expect(generatedError).toBeNull();
+    const { data: entries, error: entriesError } = await owner.from("meal_plan_entries")
+      .select("id,planned_for,recipe_id,status")
+      .in("id", result.data ?? []);
+    expect(entriesError).toBeNull();
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ planned_for: "2035-01-01", recipe_id: recipeId, status: "planned" }),
+      expect.objectContaining({ planned_for: "2035-01-02", recipe_id: generated?.id, status: "planned" }),
+    ]));
+  });
+
+  test("rejects malformed assignment dates and rolls back every generated recipe and assignment", async () => {
+    const validTitle = `Weekly rollback recipe ${crypto.randomUUID()}`;
+    const failed = await owner.rpc("confirm_weekly_dinner_plan", {
+      p_assignments: [
+        { generatedRecipe: generatedRecipe(validTitle), plannedFor: "2035-01-03", recipeId: null },
+        { generatedRecipe: generatedRecipe("Later draft"), plannedFor: "2035-1-04", recipeId: null },
+      ],
+      p_household_id: ownerHouseholdId,
+      p_week_start: "2035-01-01",
+    });
+    expect(failed.error).not.toBeNull();
+
+    const { count: recipes } = await owner.from("recipes")
+      .select("id", { count: "exact", head: true }).eq("title", validTitle);
+    const { count: entries } = await owner.from("meal_plan_entries")
+      .select("id", { count: "exact", head: true }).in("planned_for", ["2035-01-03", "2035-01-04"]);
+    expect(recipes).toBe(0);
+    expect(entries).toBe(0);
+  });
+
+  test("denies foreign household saved recipes without persisting a generated draft", async () => {
+    const foreignRecipeId = await createRecipe(outsider, outsiderHouseholdId, `Foreign weekly recipe ${crypto.randomUUID()}`);
+    const generatedTitle = `Foreign weekly rollback ${crypto.randomUUID()}`;
+    const failed = await owner.rpc("confirm_weekly_dinner_plan", {
+      p_assignments: [
+        { generatedRecipe: generatedRecipe(generatedTitle), plannedFor: "2035-01-05", recipeId: null },
+        { generatedRecipe: null, plannedFor: "2035-01-06", recipeId: foreignRecipeId },
+      ],
+      p_household_id: ownerHouseholdId,
+      p_week_start: "2035-01-01",
+    });
+    expect(failed.error).not.toBeNull();
+
+    const { count } = await owner.from("recipes")
+      .select("id", { count: "exact", head: true }).eq("title", generatedTitle);
+    expect(count).toBe(0);
+  });
+
+  test("rejects confirmation over a completed dinner and preserves the completed entry", async () => {
+    const completedRecipeId = await createRecipe(
+      owner,
+      ownerHouseholdId,
+      `Completed weekly recipe ${crypto.randomUUID()}`,
+      "Completed weekly ingredient",
+    );
+    const completed = await owner.rpc("assign_dinner", {
+      p_household_id: ownerHouseholdId,
+      p_planned_for: "2035-01-07",
+      p_recipe_id: completedRecipeId,
+    });
+    expect(completed.error).toBeNull();
+    expect((await owner.rpc("complete_meal_plan_entry", { p_entry_id: completed.data! })).error).toBeNull();
+
+    const generatedTitle = `Completed weekly rollback ${crypto.randomUUID()}`;
+    const failed = await owner.rpc("confirm_weekly_dinner_plan", {
+      p_assignments: [{ generatedRecipe: generatedRecipe(generatedTitle), plannedFor: "2035-01-07", recipeId: null }],
+      p_household_id: ownerHouseholdId,
+      p_week_start: "2035-01-01",
+    });
+    expect(failed.error?.code).toBe("55000");
+
+    const { data: entry } = await owner.from("meal_plan_entries").select("recipe_id,status")
+      .eq("id", completed.data!).single();
+    const { count } = await owner.from("recipes")
+      .select("id", { count: "exact", head: true }).eq("title", generatedTitle);
+    expect(entry).toMatchObject({ recipe_id: completedRecipeId, status: "completed" });
+    expect(count).toBe(0);
   });
 
   test("rolls back recipe and shopping aggregates when any child value is invalid", async () => {
