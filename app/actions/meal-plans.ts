@@ -93,7 +93,10 @@ async function loadDeductionPlan(entry: DinnerMealEntry, householdId: string) {
   // Reversed rows are historical ledger records, not active deductions. They
   // must be eligible to apply again if the meal is completed a second time.
   const existingDeductions = (deductionsResult.data ?? [])
-    .filter((deduction) => deduction.status !== "reversed")
+    .filter(
+      (deduction): deduction is typeof deduction & { recipe_ingredient_id: string } =>
+        deduction.status !== "reversed" && deduction.recipe_ingredient_id !== null,
+    )
     .map((deduction) => ({ recipeIngredientId: deduction.recipe_ingredient_id }));
 
   const pantry = (pantryResult.data ?? []).map((item) => ({
@@ -199,48 +202,14 @@ export async function assignDinner(formData: FormData) {
   }
 
   const { householdId } = await requireHousehold();
-  const { supabase, dinnerSlotId } = await getDefaultDinnerSlot(householdId);
-
-  // Verify the recipe belongs to the active household before using it in an
-  // upsert. This also produces a clear failure when a forged recipe ID is sent.
-  const { data: recipe, error: recipeError } = await supabase
-    .from("recipes")
-    .select("id")
-    .eq("id", parsedInput.data.recipeId)
-    .eq("household_id", householdId)
-    .maybeSingle();
-  if (recipeError || !recipe) {
-    throw new Error("Recipe not found in the current household");
-  }
-
-  // Completion is coupled to the pantry-deduction ledger in Task 15. Do not
-  // allow a dinner assignment to silently replace a completed entry.
-  const { data: existingEntry, error: existingEntryError } = await supabase
-    .from("meal_plan_entries")
-    .select("status")
-    .eq("household_id", householdId)
-    .eq("meal_slot_id", dinnerSlotId)
-    .eq("planned_for", parsedInput.data.plannedFor)
-    .maybeSingle();
-  if (existingEntryError) {
-    throw new Error("Failed to load the existing dinner plan");
-  }
-  if (existingEntry?.status === "completed") {
-    throw new Error("A completed meal must be reversed before it can be changed");
-  }
-
-  const { error } = await supabase.from("meal_plan_entries").upsert(
-    {
-      household_id: householdId,
-      meal_slot_id: dinnerSlotId,
-      recipe_id: recipe.id,
-      planned_for: parsedInput.data.plannedFor,
-      status: "planned",
-    },
-    { onConflict: "household_id,meal_slot_id,planned_for" },
-  );
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("assign_dinner", {
+    p_household_id: householdId,
+    p_planned_for: parsedInput.data.plannedFor,
+    p_recipe_id: parsedInput.data.recipeId,
+  });
   if (error) {
-    throw new Error("Failed to assign dinner");
+    throw new Error("We could not assign that dinner. Refresh the planner and try again.");
   }
 
   revalidatePath("/planner");
@@ -253,36 +222,14 @@ async function updateDinnerStatus(formData: FormData, status: "planned" | "skipp
     throw new Error("Meal plan entry identifier is invalid");
   }
 
-  const { householdId } = await requireHousehold();
-  const { supabase, dinnerSlotId } = await getDefaultDinnerSlot(householdId);
-  const { data: entry, error: entryError } = await supabase
-    .from("meal_plan_entries")
-    .select("id,status")
-    .eq("id", parsedEntryId.data)
-    .eq("household_id", householdId)
-    .eq("meal_slot_id", dinnerSlotId)
-    .maybeSingle();
-
-  if (entryError || !entry) {
-    throw new Error("Meal plan entry not found in the current household");
-  }
-  if (entry.status === "completed") {
-    throw new Error("A completed meal must be reversed before its status can change");
-  }
-  if (status === "planned" && entry.status !== "skipped") {
-    throw new Error("Only skipped meals can be restored to planned");
-  }
-
-  const { data: updatedEntry, error: updateError } = await supabase
-    .from("meal_plan_entries")
-    .update({ status })
-    .eq("id", entry.id)
-    .eq("household_id", householdId)
-    .eq("meal_slot_id", dinnerSlotId)
-    .select("id")
-    .maybeSingle();
-  if (updateError || !updatedEntry) {
-    throw new Error("Failed to update meal plan status");
+  await requireHousehold();
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_dinner_status", {
+    p_entry_id: parsedEntryId.data,
+    p_target_status: status,
+  });
+  if (error) {
+    throw new Error("We could not update that dinner. Refresh the planner and try again.");
   }
 
   revalidatePath("/planner");
@@ -299,54 +246,28 @@ export async function markMealPlanned(formData: FormData) {
   await updateDinnerStatus(formData, "planned");
 }
 
-/**
- * Applies the conservative deduction plan for a planned Dinner and records
- * every ingredient in the ledger. Calling this after a successful completion
- * is intentionally a no-op, which protects against duplicate form submits.
- */
+/** Completes a Dinner using the database-derived, locked deduction plan. */
 export async function completeMeal(formData: FormData) {
   const parsedEntryId = mealPlanEntryIdSchema.safeParse(formData.get("entryId"));
   if (!parsedEntryId.success) {
     throw new Error("Meal plan entry identifier is invalid");
   }
 
-  const { householdId } = await requireHousehold();
-  const { supabase, entry } = await getDinnerEntry(parsedEntryId.data, householdId);
-
-  if (entry.status === "completed") {
-    return;
-  }
-  if (entry.status !== "planned") {
-    throw new Error("Only planned dinners can be completed");
-  }
-
-  const plan = await loadDeductionPlan(entry, householdId);
-  const { error: completionError } = await supabase.rpc("apply_meal_completion_deductions", {
-    p_entry_id: entry.id,
-    p_deductions: plan.map((item) => ({
-      recipeIngredientId: item.recipeIngredientId,
-      pantryItemId: item.pantryItemId,
-      itemName: item.itemName,
-      // The ledger is deliberately complete, including items that cannot be
-      // safely deducted. Preserve that review record with explicit sentinel
-      // values when the source recipe omitted a quantity or unit.
-      quantity: item.quantity ?? 0,
-      unit: item.unit ?? "unknown",
-      status: item.reviewRequired ? "review_required" : "applied",
-    })),
+  await requireHousehold();
+  const supabase = await createClient();
+  const { error: completionError } = await supabase.rpc("complete_meal_plan_entry", {
+    p_entry_id: parsedEntryId.data,
   });
-  if (completionError) throw new Error("Failed to mark meal completed");
+  if (completionError) {
+    throw new Error("We could not complete that meal. Refresh the planner and try again.");
+  }
 
   revalidatePath("/planner");
   revalidatePath("/pantry");
   revalidatePath("/shopping");
 }
 
-/**
- * Restores the exact quantities recorded in applied deductions. Review rows
- * never changed pantry stock, so they are only marked reversed. Missing pantry
- * records are tolerated: there is no safe item to restore in that case.
- */
+/** Restores the exact locked ledger quantities after explicit confirmation. */
 export async function reverseCompletedMeal(formData: FormData) {
   const parsedInput = reversalSchema.safeParse({
     entryId: formData.get("entryId"),
@@ -356,16 +277,14 @@ export async function reverseCompletedMeal(formData: FormData) {
     throw new Error("Confirm reversal before restoring a completed meal");
   }
 
-  const { householdId } = await requireHousehold();
-  const { supabase, entry } = await getDinnerEntry(parsedInput.data.entryId, householdId);
-  if (entry.status !== "completed") {
-    throw new Error("Only completed dinners can be reversed");
-  }
-
+  await requireHousehold();
+  const supabase = await createClient();
   const { error: reversalError } = await supabase.rpc("reverse_meal_completion_deductions", {
-    p_entry_id: entry.id,
+    p_entry_id: parsedInput.data.entryId,
   });
-  if (reversalError) throw new Error("Failed to restore the meal to planned");
+  if (reversalError) {
+    throw new Error("We could not reverse that meal. Refresh the planner and try again.");
+  }
 
   revalidatePath("/planner");
   revalidatePath("/pantry");

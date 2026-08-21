@@ -22,6 +22,7 @@ afterEach(() => {
 describe("ExtensionRecipeImport", () => {
   test("clears a valid fragment and prefills the normal editable recipe form", async () => {
     setDraft({
+      recipeImportVersion: 1,
       title: "Visible recipe",
       sourceUrl: "https://recipes.example/visible",
       servings: 4,
@@ -47,5 +48,21 @@ describe("ExtensionRecipeImport", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The browser extension draft was missing or invalid.");
     expect(screen.queryByRole("button", { name: "Save recipe" })).not.toBeInTheDocument();
     expect(window.location.hash).toBe("");
+  });
+
+  test("fails closed for an unversioned or future-version draft", async () => {
+    setDraft({
+      recipeImportVersion: 2,
+      title: "Future recipe",
+      sourceUrl: "https://recipes.example/future",
+      servings: 2,
+      ingredients: [],
+      instructions: "Cook.",
+    });
+
+    render(<ExtensionRecipeImport />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("unsupported version");
+    expect(screen.queryByRole("button", { name: "Save recipe" })).not.toBeInTheDocument();
   });
 });

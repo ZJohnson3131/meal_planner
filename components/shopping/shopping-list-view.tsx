@@ -1,17 +1,29 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useActionState, useOptimistic, useState, useSyncExternalStore } from "react";
 import { useFormStatus } from "react-dom";
 
-import { generateShoppingList } from "@/app/actions/shopping";
+import {
+  generateShoppingList,
+  setShoppingItemStatus,
+  type ShoppingItemFormState,
+} from "@/app/actions/shopping";
+import {
+  calendarDateToNeutralDate,
+  calendarWeekRange,
+  isIsoCalendarDate,
+  localCalendarDate,
+} from "@/lib/domain/calendar";
 import { exportShoppingListText } from "@/lib/domain/shopping-export";
+
+type ShoppingItemStatus = "needed" | "checked" | "dismissed";
 
 export type ShoppingListItem = {
   id: string;
   item_name: string;
   delta_quantity: number | string | null;
   unit: string | null;
-  status: "needed" | "checked" | "dismissed";
+  status: ShoppingItemStatus;
   review_required: boolean;
   review_reason: string | null;
 };
@@ -25,13 +37,12 @@ export type ShoppingList = {
 };
 
 type ShoppingListViewProps = {
+  initialCalendarDate?: string;
   shoppingList: ShoppingList | null;
   items: ShoppingListItem[];
 };
 
-function dateFromIso(isoDate: string) {
-  return new Date(`${isoDate}T00:00:00Z`);
-}
+const initialStatusState: ShoppingItemFormState = { error: null, success: false };
 
 function formatDateRange(startDate: string, endDate: string) {
   const formatter = new Intl.DateTimeFormat("en-AU", {
@@ -41,31 +52,14 @@ function formatDateRange(startDate: string, endDate: string) {
     timeZone: "UTC",
   });
 
-  return `${formatter.format(dateFromIso(startDate))} – ${formatter.format(dateFromIso(endDate))}`;
-}
-
-function defaultWeekRange() {
-  const today = new Date();
-  const mondayOffset = (today.getUTCDay() + 6) % 7;
-  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - mondayOffset));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 6);
-
-  return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
-  };
+  return `${formatter.format(calendarDateToNeutralDate(startDate))} – ${formatter.format(calendarDateToNeutralDate(endDate))}`;
 }
 
 function GenerateButton() {
   const { pending } = useFormStatus();
 
   return (
-    <button
-      className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-      disabled={pending}
-      type="submit"
-    >
+    <button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={pending} type="submit">
       {pending ? "Generating…" : "Generate shopping list"}
     </button>
   );
@@ -82,31 +76,105 @@ function Quantity({ item }: { item: ShoppingListItem }) {
 function ReviewFlag({ item }: { item: ShoppingListItem }) {
   if (!item.review_required) return null;
 
+  return <p className="mt-1 text-xs text-amber-800">Review needed{item.review_reason ? `: ${item.review_reason}` : "."}</p>;
+}
+
+function ShoppingItemRow({ item }: { item: ShoppingListItem }) {
+  const [optimisticStatus, setOptimisticStatus] = useOptimistic(item.status);
+  const [state, submitStatus, pending] = useActionState(async (previousState: ShoppingItemFormState, formData: FormData) => {
+    const requestedStatus = formData.get("status");
+    if (requestedStatus === "needed" || requestedStatus === "checked" || requestedStatus === "dismissed") {
+      setOptimisticStatus(requestedStatus);
+    }
+    return setShoppingItemStatus(previousState, formData);
+  }, initialStatusState);
+  const checked = optimisticStatus === "checked";
+
   return (
-    <p className="mt-1 text-xs text-amber-800">
-      Review needed{item.review_reason ? `: ${item.review_reason}` : "."}
-    </p>
+    <li className="px-5 py-4">
+      <div className="flex items-start gap-3">
+        <form action={submitStatus}>
+          <input name="itemId" type="hidden" value={item.id} />
+          <input name="status" type="hidden" value={checked ? "needed" : "checked"} />
+          <input
+            aria-label={`Mark ${item.item_name} as checked`}
+            checked={checked}
+            className="mt-1 h-4 w-4 rounded border-slate-400 text-emerald-700 focus:ring-emerald-700 disabled:cursor-wait disabled:opacity-60"
+            disabled={pending}
+            id={`shopping-item-${item.id}`}
+            onChange={(event) => event.currentTarget.form?.requestSubmit()}
+            type="checkbox"
+          />
+        </form>
+        <label className="min-w-0 flex-1 cursor-pointer" htmlFor={`shopping-item-${item.id}`}>
+          <span className={`block font-medium ${checked ? "text-slate-500 line-through" : "text-slate-950"}`}>{item.item_name}</span>
+          <ReviewFlag item={item} />
+        </label>
+        <Quantity item={item} />
+        <form action={submitStatus}>
+          <input name="itemId" type="hidden" value={item.id} />
+          <input name="status" type="hidden" value="dismissed" />
+          <button className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-wait disabled:opacity-60" disabled={pending} type="submit">
+            {pending ? "Saving…" : `Dismiss ${item.item_name}`}
+          </button>
+        </form>
+      </div>
+      {state.error ? <p className="mt-2 text-sm text-red-700" role="alert">{state.error}</p> : null}
+    </li>
   );
 }
 
-/** Generates, reviews, exports, and locally checks off the latest shopping list. */
-export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps) {
-  const defaults = useMemo(() => defaultWeekRange(), []);
-  const [checkedItemIds, setCheckedItemIds] = useState(() => new Set(
-    items.filter((item) => item.status === "checked").map((item) => item.id),
-  ));
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+function DismissedShoppingItem({ item }: { item: ShoppingListItem }) {
+  const [optimisticStatus, setOptimisticStatus] = useOptimistic(item.status);
+  const [state, submitStatus, pending] = useActionState(async (previousState: ShoppingItemFormState, formData: FormData) => {
+    setOptimisticStatus("needed");
+    return setShoppingItemStatus(previousState, formData);
+  }, initialStatusState);
 
+  if (optimisticStatus !== "dismissed") return null;
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+      <span className="text-sm text-slate-600">{item.item_name}</span>
+      <form action={submitStatus}>
+        <input name="itemId" type="hidden" value={item.id} />
+        <input name="status" type="hidden" value="needed" />
+        <button className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-wait disabled:opacity-60" disabled={pending} type="submit">
+          {pending ? "Restoring…" : `Restore ${item.item_name}`}
+        </button>
+      </form>
+      {state.error ? <p className="basis-full text-sm text-red-700" role="alert">{state.error}</p> : null}
+    </li>
+  );
+}
+
+/** Generates, reviews, exports, and persists item state for the latest shopping list. */
+export function ShoppingListView({ initialCalendarDate, shoppingList, items }: ShoppingListViewProps) {
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const [selectedRange, setSelectedRange] = useState<{ startDate: string; endDate: string } | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const browserDate = initialCalendarDate && isIsoCalendarDate(initialCalendarDate)
+    ? initialCalendarDate
+    : hydrated
+      ? localCalendarDate(new Date())
+      : null;
+  const range = selectedRange ?? (browserDate
+    ? calendarWeekRange(browserDate)
+    : { startDate: "", endDate: "" });
+
+  const exportableItems = shoppingList
+    ? items.filter((item) => item.status === "needed" || item.status === "checked")
+    : [];
+  const dismissedItems = shoppingList ? items.filter((item) => item.status === "dismissed") : [];
+  const reviewItems = exportableItems.filter((item) => item.review_required);
   const exportText = shoppingList
-    ? exportShoppingListText(items.map((item) => ({
+    ? exportShoppingListText(exportableItems.map((item) => ({
       itemName: item.item_name,
       deltaQuantity: item.delta_quantity === null ? null : Number(item.delta_quantity),
       unit: item.unit,
       reviewRequired: item.review_required,
     })))
     : "";
-  const neededItems = shoppingList ? items.filter((item) => item.status !== "dismissed") : [];
-  const reviewItems = neededItems.filter((item) => item.review_required);
 
   async function copyList() {
     try {
@@ -117,15 +185,6 @@ export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps)
     }
   }
 
-  function toggleChecked(itemId: string) {
-    setCheckedItemIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      return next;
-    });
-  }
-
   return (
     <section aria-labelledby="shopping-list-heading" className="space-y-8">
       <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -134,11 +193,11 @@ export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps)
         <form action={generateShoppingList} className="mt-4 flex flex-wrap items-end gap-4">
           <label className="text-sm font-medium text-slate-800" htmlFor="shopping-start-date">
             Start date
-            <input className="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-slate-950 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={defaults.startDate} id="shopping-start-date" name="startDate" required type="date" />
+            <input className="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-slate-950 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" id="shopping-start-date" name="startDate" onChange={(event) => setSelectedRange({ ...range, startDate: event.target.value })} required type="date" value={range.startDate} />
           </label>
           <label className="text-sm font-medium text-slate-800" htmlFor="shopping-end-date">
             End date
-            <input className="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-slate-950 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" defaultValue={defaults.endDate} id="shopping-end-date" name="endDate" required type="date" />
+            <input className="mt-1 block rounded-md border border-slate-300 px-3 py-2 text-slate-950 focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-100" id="shopping-end-date" name="endDate" onChange={(event) => setSelectedRange({ ...range, endDate: event.target.value })} required type="date" value={range.endDate} />
           </label>
           <GenerateButton />
         </form>
@@ -159,26 +218,23 @@ export function ShoppingListView({ shoppingList, items }: ShoppingListViewProps)
           <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-5 py-4">
               <h3 className="font-semibold text-slate-950">Needed items</h3>
-              <p className="mt-1 text-sm text-slate-600">Check off items as you shop. Checkmarks stay in this browser until a future update saves them.</p>
+              <p className="mt-1 text-sm text-slate-600">Checked and dismissed states are saved for your household.</p>
             </div>
-            {neededItems.length === 0 ? <p className="p-5 text-sm text-slate-600">Your pantry covers every planned ingredient in this list.</p> : (
-              <ul className="divide-y divide-slate-200" aria-label="Shopping list items">
-                {neededItems.map((item) => {
-                  const checked = checkedItemIds.has(item.id);
-                  return (
-                    <li className="flex gap-3 px-5 py-4" key={item.id}>
-                      <input aria-label={`Mark ${item.item_name} as checked`} checked={checked} className="mt-1 h-4 w-4 rounded border-slate-400 text-emerald-700 focus:ring-emerald-700" id={`shopping-item-${item.id}`} onChange={() => toggleChecked(item.id)} type="checkbox" />
-                      <label className="min-w-0 flex-1 cursor-pointer" htmlFor={`shopping-item-${item.id}`}>
-                        <span className={`block font-medium ${checked ? "text-slate-500 line-through" : "text-slate-950"}`}>{item.item_name}</span>
-                        <ReviewFlag item={item} />
-                      </label>
-                      <Quantity item={item} />
-                    </li>
-                  );
-                })}
+            {exportableItems.length === 0 ? <p className="p-5 text-sm text-slate-600">Your pantry covers every planned ingredient in this list.</p> : (
+              <ul aria-label="Shopping list items" className="divide-y divide-slate-200">
+                {exportableItems.map((item) => <ShoppingItemRow item={item} key={item.id} />)}
               </ul>
             )}
           </div>
+
+          {dismissedItems.length > 0 ? (
+            <details className="rounded-lg border border-slate-200 bg-slate-50">
+              <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-800">Dismissed items ({dismissedItems.length})</summary>
+              <ul aria-label="Dismissed shopping list items" className="divide-y divide-slate-200 border-t border-slate-200">
+                {dismissedItems.map((item) => <DismissedShoppingItem item={item} key={item.id} />)}
+              </ul>
+            </details>
+          ) : null}
 
           {reviewItems.length > 0 ? (
             <aside aria-labelledby="shopping-review-heading" className="rounded-lg border border-amber-200 bg-amber-50 p-5">

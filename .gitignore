@@ -16,6 +16,9 @@
 /test-results
 /playwright-report
 
+# Local security audit details (never publish unresolved findings)
+/docs/reviews/2026-08-20-codebase-findings.md
+
 # next.js
 /.next/
 /out/

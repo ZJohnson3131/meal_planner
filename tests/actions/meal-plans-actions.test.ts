@@ -2,14 +2,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
-  dinnerMaybeSingle: vi.fn(),
-  entryMaybeSingle: vi.fn(),
-  recipeMaybeSingle: vi.fn(),
   revalidatePath: vi.fn(),
   requireHousehold: vi.fn(),
-  update: vi.fn(),
-  updateMaybeSingle: vi.fn(),
-  upsert: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/household", () => ({ requireHousehold: mocks.requireHousehold }));
@@ -32,101 +27,60 @@ function entryFormData() {
   return formData;
 }
 
-function equals(result: unknown) {
-  return vi.fn().mockReturnValue(result);
-}
-
-function configureClient(options: { existingStatus?: "planned" | "skipped" | "completed"; recipe?: { id: string } | null; entry?: { id: string; status: "planned" | "skipped" | "completed" } | null } = {}) {
-  const dinnerSlot = { id: "dinner-slot" };
-  mocks.dinnerMaybeSingle.mockResolvedValue({ data: dinnerSlot, error: null });
-  mocks.recipeMaybeSingle.mockResolvedValue({ data: options.recipe === undefined ? { id: recipeId } : options.recipe, error: null });
-  mocks.entryMaybeSingle.mockResolvedValue({
-    data: options.entry === undefined ? (options.existingStatus === undefined ? null : { id: entryId, status: options.existingStatus }) : options.entry,
-    error: null,
-  });
-  mocks.upsert.mockResolvedValue({ error: null });
-  mocks.updateMaybeSingle.mockResolvedValue({ data: { id: entryId }, error: null });
-
-  const dinnerQuery = { select: vi.fn().mockReturnValue({ eq: equals({ eq: equals({ eq: equals({ maybeSingle: mocks.dinnerMaybeSingle }) }) }) }) };
-  const recipeQuery = { select: vi.fn().mockReturnValue({ eq: equals({ eq: equals({ maybeSingle: mocks.recipeMaybeSingle }) }) }) };
-  const existingQuery = { select: vi.fn().mockReturnValue({ eq: equals({ eq: equals({ eq: equals({ maybeSingle: mocks.entryMaybeSingle }) }) }) }) };
-  const updateQuery = {
-    update: mocks.update.mockReturnValue({
-      eq: equals({
-        eq: equals({
-          eq: equals({ select: vi.fn().mockReturnValue({ maybeSingle: mocks.updateMaybeSingle }) }),
-        }),
-      }),
-    }),
-  };
-
-  mocks.createClient.mockResolvedValue({
-    from: vi.fn((table: string) => {
-      if (table === "meal_slots") return dinnerQuery;
-      if (table === "recipes") return recipeQuery;
-      if (table === "meal_plan_entries") {
-        return { ...existingQuery, ...updateQuery, upsert: mocks.upsert };
-      }
-      throw new Error(`Unexpected table: ${table}`);
-    }),
-  });
-}
-
-describe("meal-plan server actions", () => {
+describe("meal-plan RPC actions", () => {
   beforeEach(() => {
     vi.resetModules();
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.requireHousehold.mockResolvedValue({ householdId: "household-123" });
-    configureClient();
+    mocks.rpc.mockResolvedValue({ error: null });
+    mocks.createClient.mockResolvedValue({ rpc: mocks.rpc });
   });
 
-  test("assigns a verified household recipe to the active household's Dinner slot", async () => {
+  test("assigns Dinner through the household-authorized transactional RPC", async () => {
     const { assignDinner } = await import("@/app/actions/meal-plans");
-
     await assignDinner(assignmentFormData());
 
-    expect(mocks.upsert).toHaveBeenCalledWith({
-      household_id: "household-123", meal_slot_id: "dinner-slot", recipe_id: recipeId,
-      planned_for: "2026-06-15", status: "planned",
-    }, { onConflict: "household_id,meal_slot_id,planned_for" });
+    expect(mocks.rpc).toHaveBeenCalledWith("assign_dinner", {
+      p_household_id: "household-123",
+      p_planned_for: "2026-06-15",
+      p_recipe_id: recipeId,
+    });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/planner");
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/shopping");
   });
 
-  test("rejects an assignment for a recipe outside the active household", async () => {
-    configureClient({ recipe: null });
+  test.each([
+    ["markMealSkipped", "skipped"],
+    ["markMealPlanned", "planned"],
+  ] as const)("%s delegates the locked transition to set_dinner_status", async (actionName, status) => {
+    const actions = await import("@/app/actions/meal-plans");
+    await actions[actionName](entryFormData());
+
+    expect(mocks.rpc).toHaveBeenCalledWith("set_dinner_status", {
+      p_entry_id: entryId,
+      p_target_status: status,
+    });
+  });
+
+  test("does not revalidate when assignment authorization or concurrency fails", async () => {
+    mocks.rpc.mockResolvedValue({ error: new Error("transition rejected") });
     const { assignDinner } = await import("@/app/actions/meal-plans");
 
-    await expect(assignDinner(assignmentFormData())).rejects.toThrow("Recipe not found in the current household");
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    await expect(assignDinner(assignmentFormData())).rejects.toThrow(
+      "We could not assign that dinner",
+    );
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  test("marks only a current-household Dinner entry as skipped", async () => {
-    configureClient({ entry: { id: entryId, status: "planned" } });
+  test("rejects malformed identifiers before authentication or database access", async () => {
     const { markMealSkipped } = await import("@/app/actions/meal-plans");
+    const invalid = entryFormData();
+    invalid.set("entryId", "forged");
 
-    await markMealSkipped(entryFormData());
-
-    expect(mocks.update).toHaveBeenCalledWith({ status: "skipped" });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/planner");
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/shopping");
-  });
-
-  test("restores a skipped dinner to planned", async () => {
-    configureClient({ entry: { id: entryId, status: "skipped" } });
-    const { markMealPlanned } = await import("@/app/actions/meal-plans");
-
-    await markMealPlanned(entryFormData());
-
-    expect(mocks.update).toHaveBeenCalledWith({ status: "planned" });
-  });
-
-  test("does not update a forged entry ID from another household", async () => {
-    configureClient({ entry: null });
-    const { markMealSkipped } = await import("@/app/actions/meal-plans");
-
-    await expect(markMealSkipped(entryFormData())).rejects.toThrow("Meal plan entry not found in the current household");
-    expect(mocks.update).not.toHaveBeenCalled();
+    await expect(markMealSkipped(invalid)).rejects.toThrow(
+      "Meal plan entry identifier is invalid",
+    );
+    expect(mocks.requireHousehold).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });

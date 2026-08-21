@@ -2,35 +2,15 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
-  delete: vi.fn(),
-  deleteEqHousehold: vi.fn(),
-  deleteEqId: vi.fn(),
-  deleteMaybeSingle: vi.fn(),
-  existingEq: vi.fn(),
-  existingIs: vi.fn(),
-  existingLimit: vi.fn(),
-  existingQuery: {},
-  insert: vi.fn(),
   revalidatePath: vi.fn(),
   requireHousehold: vi.fn(),
-  update: vi.fn(),
-  updateEqHousehold: vi.fn(),
-  updateEqId: vi.fn(),
-  updateMaybeSingle: vi.fn(),
-  updateSelect: vi.fn(),
+  rpc: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/household", () => ({
-  requireHousehold: mocks.requireHousehold,
-}));
-
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: mocks.createClient,
-}));
-
-vi.mock("next/cache", () => ({
-  revalidatePath: mocks.revalidatePath,
-}));
+vi.mock("@/lib/auth/household", () => ({ requireHousehold: mocks.requireHousehold }));
+vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
+vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("next/navigation", () => ({ unstable_rethrow: vi.fn() }));
 
 const pantryItemId = "9f11fef8-1b56-4a82-b5d6-a7a01a3055bb";
 
@@ -45,125 +25,91 @@ function pantryFormData(overrides: Record<string, string> = {}) {
   return formData;
 }
 
-describe("pantry server actions", () => {
+describe("pantry RPC actions", () => {
   beforeEach(() => {
     vi.resetModules();
-    Object.values(mocks).forEach((mock) => {
-      if ("mockReset" in mock && typeof mock.mockReset === "function") {
-        mock.mockReset();
-      }
-    });
+    Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.requireHousehold.mockResolvedValue({ householdId: "household-123" });
-    Object.assign(mocks.existingQuery, {
-      eq: mocks.existingEq,
-      is: mocks.existingIs,
-      limit: mocks.existingLimit,
-    });
-    mocks.existingEq.mockReturnValue(mocks.existingQuery);
-    mocks.existingIs.mockReturnValue(mocks.existingQuery);
-    mocks.existingLimit.mockResolvedValue({ data: [], error: null });
-    mocks.insert.mockResolvedValue({ error: null });
-    mocks.updateMaybeSingle.mockResolvedValue({ data: { id: pantryItemId }, error: null });
-    mocks.updateSelect.mockReturnValue({ maybeSingle: mocks.updateMaybeSingle });
-    mocks.updateEqHousehold.mockReturnValue({ select: mocks.updateSelect });
-    mocks.updateEqId.mockReturnValue({ eq: mocks.updateEqHousehold });
-    mocks.update.mockReturnValue({ eq: mocks.updateEqId });
-    mocks.deleteMaybeSingle.mockResolvedValue({ data: { id: pantryItemId }, error: null });
-    mocks.deleteEqHousehold.mockReturnValue({ select: mocks.updateSelect });
-    mocks.deleteEqId.mockReturnValue({ eq: mocks.deleteEqHousehold });
-    mocks.delete.mockReturnValue({ eq: mocks.deleteEqId });
-    mocks.createClient.mockResolvedValue({
-      from: vi.fn((table: string) => {
-        if (table !== "pantry_items") throw new Error(`Unexpected table: ${table}`);
-        return {
-          select: vi.fn(() => mocks.existingQuery),
-          insert: mocks.insert,
-          update: mocks.update,
-          delete: mocks.delete,
-        };
-      }),
-    });
+    mocks.rpc.mockResolvedValue({ error: null });
+    mocks.createClient.mockResolvedValue({ rpc: mocks.rpc });
   });
 
-  test("creates a trimmed, household-scoped pantry item and revalidates the pantry", async () => {
+  test("creates a normalized household item through the duplicate-safe RPC", async () => {
     const { createPantryItem } = await import("@/app/actions/pantry");
-
     await createPantryItem(pantryFormData());
 
-    expect(mocks.insert).toHaveBeenCalledWith({
-      household_id: "household-123",
-      item_name: "Basmati rice",
-      quantity: 1.5,
-      unit: "kg",
-      category: "Dry goods",
-      expiry_date: "2026-12-01",
+    expect(mocks.rpc).toHaveBeenCalledWith("create_pantry_item", {
+      p_category: "Dry goods",
+      p_expiry_date: "2026-12-01",
+      p_household_id: "household-123",
+      p_item_name: "Basmati rice",
+      p_quantity: 1.5,
+      p_unit: "kg",
     });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/pantry");
   });
 
-  test("rejects invalid pantry details without accessing the database", async () => {
+  test("returns a usable form state when duplicate-name creation is rejected", async () => {
+    mocks.rpc.mockResolvedValue({ error: new Error("duplicate normalized name") });
     const { createPantryItem } = await import("@/app/actions/pantry");
 
-    await expect(createPantryItem(pantryFormData({ quantity: "-1" }))).rejects.toThrow(
-      "Pantry item details are invalid",
-    );
-
-    expect(mocks.createClient).not.toHaveBeenCalled();
+    await expect(createPantryItem(
+      { error: null, success: false },
+      pantryFormData(),
+    )).resolves.toEqual({
+      error: "We could not add this pantry item. Check the details and try again.",
+      success: false,
+    });
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  test("treats an identical active-household item as an idempotent replay", async () => {
-    mocks.existingLimit.mockResolvedValue({ data: [{ id: pantryItemId }], error: null });
-    const { createPantryItem } = await import("@/app/actions/pantry");
-
-    await createPantryItem(pantryFormData());
-
-    expect(mocks.existingEq).toHaveBeenCalledWith("household_id", "household-123");
-    expect(mocks.insert).not.toHaveBeenCalled();
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
-  });
-
-  test("updates only the active household's pantry item", async () => {
-    const { updatePantryItem } = await import("@/app/actions/pantry");
-    const formData = pantryFormData({ category: "", expiryDate: "" });
+  test("updates with the optimistic version required to detect stale edits", async () => {
+    const formData = pantryFormData({ category: "", expiryDate: "", version: "7" });
     formData.set("id", pantryItemId);
+    const { updatePantryItem } = await import("@/app/actions/pantry");
 
     await updatePantryItem(formData);
 
-    expect(mocks.update).toHaveBeenCalledWith({
-      item_name: "Basmati rice",
-      quantity: 1.5,
-      unit: "kg",
-      category: null,
-      expiry_date: null,
+    expect(mocks.rpc).toHaveBeenCalledWith("update_pantry_item", {
+      p_category: undefined,
+      p_expected_version: 7,
+      p_expiry_date: undefined,
+      p_item_id: pantryItemId,
+      p_item_name: "Basmati rice",
+      p_quantity: 1.5,
+      p_unit: "kg",
     });
-    expect(mocks.updateEqId).toHaveBeenCalledWith("id", pantryItemId);
-    expect(mocks.updateEqHousehold).toHaveBeenCalledWith("household_id", "household-123");
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/pantry");
   });
 
-  test("rejects an update when the item is not found in the active household", async () => {
-    mocks.updateMaybeSingle.mockResolvedValue({ data: null, error: null });
-    const { updatePantryItem } = await import("@/app/actions/pantry");
-    const formData = pantryFormData();
+  test("surfaces an optimistic-version conflict without revalidating stale state", async () => {
+    mocks.rpc.mockResolvedValue({ error: new Error("Pantry item changed") });
+    const formData = pantryFormData({ version: "2" });
     formData.set("id", pantryItemId);
+    const { updatePantryItem } = await import("@/app/actions/pantry");
 
-    await expect(updatePantryItem(formData)).rejects.toThrow("Failed to update pantry item");
-
-    expect(mocks.updateEqHousehold).toHaveBeenCalledWith("household_id", "household-123");
+    await expect(updatePantryItem(formData)).rejects.toThrow(
+      "We could not update that pantry item",
+    );
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
-  test("deletes only the active household's pantry item", async () => {
+  test("deletes with the optimistic version and rejects missing versions before auth", async () => {
     const { deletePantryItem } = await import("@/app/actions/pantry");
     const formData = new FormData();
     formData.set("id", pantryItemId);
+    formData.set("version", "3");
 
     await deletePantryItem(formData);
+    expect(mocks.rpc).toHaveBeenCalledWith("delete_pantry_item", {
+      p_expected_version: 3,
+      p_item_id: pantryItemId,
+    });
 
-    expect(mocks.delete).toHaveBeenCalledWith();
-    expect(mocks.deleteEqId).toHaveBeenCalledWith("id", pantryItemId);
-    expect(mocks.deleteEqHousehold).toHaveBeenCalledWith("household_id", "household-123");
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/pantry");
+    mocks.requireHousehold.mockClear();
+    formData.delete("version");
+    await expect(deletePantryItem(formData)).rejects.toThrow(
+      "Pantry item identifier is invalid",
+    );
+    expect(mocks.requireHousehold).not.toHaveBeenCalled();
   });
 });

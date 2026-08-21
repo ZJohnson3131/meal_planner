@@ -14,6 +14,8 @@ export const SUPPORTED_COOKING_UNITS = [
   "tbsp",
   "cup",
   "each",
+  "piece",
+  "pinch",
   "packet",
   "can",
   "slice",
@@ -22,6 +24,8 @@ export const SUPPORTED_COOKING_UNITS = [
 ] as const;
 
 export type SupportedCookingUnit = (typeof SUPPORTED_COOKING_UNITS)[number];
+
+const QUANTITY_DECIMAL_PLACES = 4;
 
 type UnitDefinition = {
   canonical: SupportedCookingUnit;
@@ -55,6 +59,10 @@ const units: Record<string, UnitDefinition> = {
   cup: { canonical: "cup", dimension: "volume", toBase: 250 },
   cups: { canonical: "cup", dimension: "volume", toBase: 250 },
   each: { canonical: "each", dimension: "count", toBase: 1 },
+  piece: { canonical: "piece", dimension: "count", toBase: 1 },
+  pieces: { canonical: "piece", dimension: "count", toBase: 1 },
+  pinch: { canonical: "pinch", dimension: "count", toBase: 1 },
+  pinches: { canonical: "pinch", dimension: "count", toBase: 1 },
   packet: { canonical: "packet", dimension: "count", toBase: 1 },
   packets: { canonical: "packet", dimension: "count", toBase: 1 },
   pkt: { canonical: "packet", dimension: "count", toBase: 1 },
@@ -82,10 +90,6 @@ export function normalizeSupportedUnit(unit: string | null | undefined): Support
   return lookupUnit(unit)?.canonical ?? null;
 }
 
-export function isSupportedCookingUnit(unit: string | null | undefined): unit is SupportedCookingUnit {
-  return normalizeSupportedUnit(unit) !== null;
-}
-
 export type ConversionResult =
   | { ok: true; quantity: number; unit: string }
   | { ok: false; reason: string };
@@ -93,6 +97,10 @@ export type ConversionResult =
 export function normalizeUnit(unit: string | null | undefined): string {
   const key = String(unit ?? "").trim().toLowerCase();
   return lookupUnit(key)?.canonical ?? key;
+}
+
+export function roundQuantity(quantity: number): number {
+  return Number(quantity.toFixed(QUANTITY_DECIMAL_PLACES));
 }
 
 export function convertQuantity(
@@ -113,7 +121,7 @@ export function convertQuantity(
 
   return {
     ok: true,
-    quantity: Number((baseQuantity / to.toBase).toFixed(4)),
+    quantity: roundQuantity(baseQuantity / to.toBase),
     unit: to.canonical,
   };
 }

@@ -1,6 +1,15 @@
 import { z } from "zod";
 
-const isoDate = z.string().date();
+import {
+  addCalendarDays,
+  isIsoCalendarDate,
+} from "@/lib/domain/calendar";
+
+export const MAX_SHOPPING_LIST_CALENDAR_DAYS = 32;
+
+const isoDate = z.string().refine(isIsoCalendarDate, {
+  message: "Expected a valid calendar date in YYYY-MM-DD format",
+});
 
 /**
  * A bounded calendar range keeps shopping-list generation focused on a
@@ -18,14 +27,21 @@ export const shoppingListRangeSchema = z
   })
   .refine(
     ({ startDate, endDate }) => {
-      const start = new Date(`${startDate}T00:00:00.000Z`).getTime();
-      const end = new Date(`${endDate}T00:00:00.000Z`).getTime();
-      return end - start <= 31 * 24 * 60 * 60 * 1000;
+      if (!isIsoCalendarDate(startDate) || !isIsoCalendarDate(endDate)) return false;
+      return endDate <= addCalendarDays(
+        startDate,
+        MAX_SHOPPING_LIST_CALENDAR_DAYS - 1,
+      );
     },
     {
-      message: "A shopping list can cover at most 32 days",
+      message: `A shopping list can cover at most ${MAX_SHOPPING_LIST_CALENDAR_DAYS} days`,
       path: ["endDate"],
     },
   );
+
+export const shoppingItemStatusInputSchema = z.object({
+  itemId: z.string().uuid(),
+  status: z.enum(["needed", "checked", "dismissed"]),
+});
 
 export type ShoppingListRangeInput = z.infer<typeof shoppingListRangeSchema>;

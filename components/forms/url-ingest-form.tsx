@@ -2,35 +2,93 @@
 
 import { FormEvent, useState } from "react";
 
+import {
+  RECIPE_IMPORT_LIMITS,
+  RECIPE_IMPORT_PAYLOAD_VERSION,
+  sanitizeRecipeUrl,
+  type RecipeImportIngredient,
+  type RecipeImportPayloadV1,
+} from "@/lib/recipes/recipe-import-contract";
+
 export const RECIPE_INGESTED_EVENT = "meal-planner:recipe-ingested";
 
-export type RecipeIngestedData = {
-  title: string;
-  sourceUrl: string;
-  servings: number | null;
-  ingredients: Array<{
-    itemName: string;
-    quantity: number | null;
-    unit: string | null;
-    notes: string | null;
-  }>;
-  instructions: string;
-  ingestionStatus: "parsed" | "needs_review" | "failed";
-};
+export type RecipeIngestedData = RecipeImportPayloadV1;
 
-function isRecipeIngestedData(value: unknown): value is RecipeIngestedData {
-  if (!value || typeof value !== "object") return false;
+function boundedText(value: unknown, maximumCharacters: number, allowEmpty = true): string | null {
+  if (typeof value !== "string" || value.length > maximumCharacters) return null;
+  if (!allowEmpty && value.trim().length === 0) return null;
+  return value;
+}
 
-  const recipe = value as Partial<RecipeIngestedData>;
-  return (
-    typeof recipe.title === "string" &&
-    typeof recipe.sourceUrl === "string" &&
-    Array.isArray(recipe.ingredients) &&
-    typeof recipe.instructions === "string" &&
-    (recipe.ingestionStatus === "parsed" ||
-      recipe.ingestionStatus === "needs_review" ||
-      recipe.ingestionStatus === "failed")
-  );
+function validatedIngredient(value: unknown): RecipeImportIngredient | null {
+  if (!value || typeof value !== "object") return null;
+
+  const ingredient = value as Record<string, unknown>;
+  const itemName = boundedText(ingredient.itemName, RECIPE_IMPORT_LIMITS.titleCharacters, false);
+  const quantity = ingredient.quantity;
+  const unit = ingredient.unit === null
+    ? null
+    : boundedText(ingredient.unit, RECIPE_IMPORT_LIMITS.unitCharacters);
+  const notes = ingredient.notes === null
+    ? null
+    : boundedText(ingredient.notes, RECIPE_IMPORT_LIMITS.ingredientLineCharacters);
+
+  if (
+    itemName === null
+    || (quantity !== null && (
+      typeof quantity !== "number"
+      || !Number.isFinite(quantity)
+      || quantity <= 0
+    ))
+    || unit === null && ingredient.unit !== null
+    || notes === null && ingredient.notes !== null
+  ) return null;
+
+  return { itemName, notes, quantity: quantity as number | null, unit };
+}
+
+export function validatedRecipeIngestedData(
+  value: unknown,
+  maximumIngredients: number = RECIPE_IMPORT_LIMITS.ingredients,
+): RecipeIngestedData | null {
+  if (!value || typeof value !== "object") return null;
+
+  const recipe = value as Record<string, unknown>;
+  const title = boundedText(recipe.title, RECIPE_IMPORT_LIMITS.titleCharacters, false);
+  const rawSourceUrl = boundedText(recipe.sourceUrl, RECIPE_IMPORT_LIMITS.sourceUrlCharacters);
+  const sourceUrl = rawSourceUrl === "" ? "" : rawSourceUrl ? sanitizeRecipeUrl(rawSourceUrl) : null;
+  const instructions = boundedText(recipe.instructions, RECIPE_IMPORT_LIMITS.instructionsCharacters);
+  const servings = recipe.servings;
+  const ingestionStatus = recipe.ingestionStatus;
+  if (
+    recipe.recipeImportVersion !== RECIPE_IMPORT_PAYLOAD_VERSION
+    || title === null
+    || sourceUrl === null
+    || (sourceUrl === "" && ingestionStatus !== "failed")
+    || instructions === null
+    || (servings !== null && (
+      typeof servings !== "number"
+      || !Number.isFinite(servings)
+      || servings <= 0
+      || servings > RECIPE_IMPORT_LIMITS.servingsMaximum
+    ))
+    || !Array.isArray(recipe.ingredients)
+    || recipe.ingredients.length > maximumIngredients
+    || (ingestionStatus !== "parsed" && ingestionStatus !== "needs_review" && ingestionStatus !== "failed")
+  ) return null;
+
+  const ingredients = recipe.ingredients.map(validatedIngredient);
+  if (ingredients.some((ingredient) => ingredient === null)) return null;
+
+  return {
+    recipeImportVersion: RECIPE_IMPORT_PAYLOAD_VERSION,
+    title,
+    sourceUrl,
+    servings: servings as number | null,
+    ingredients: ingredients.filter((ingredient): ingredient is RecipeImportIngredient => ingredient !== null),
+    instructions,
+    ingestionStatus,
+  };
 }
 
 /**
@@ -67,13 +125,14 @@ export function UrlIngestForm() {
         return;
       }
 
-      if (!isRecipeIngestedData(data)) {
-        setError("The imported recipe response was incomplete. Please enter the recipe manually.");
+      const validatedRecipe = validatedRecipeIngestedData(data);
+      if (!validatedRecipe) {
+        setError("The imported recipe response was unsupported or exceeded safe limits. Please enter the recipe manually.");
         return;
       }
 
-      setRecipe(data);
-      window.dispatchEvent(new CustomEvent<RecipeIngestedData>(RECIPE_INGESTED_EVENT, { detail: data }));
+      setRecipe(validatedRecipe);
+      window.dispatchEvent(new CustomEvent<RecipeIngestedData>(RECIPE_INGESTED_EVENT, { detail: validatedRecipe }));
     } catch {
       setError("The recipe could not be reached. Check the URL and try again.");
     } finally {

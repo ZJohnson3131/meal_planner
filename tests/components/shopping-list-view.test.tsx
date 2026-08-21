@@ -2,16 +2,25 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ generateShoppingList: vi.fn() }));
+const mocks = vi.hoisted(() => ({ generateShoppingList: vi.fn(), setShoppingItemStatus: vi.fn() }));
 const clipboardWriteText = vi.fn();
 
-vi.mock("@/app/actions/shopping", () => ({ generateShoppingList: mocks.generateShoppingList }));
+vi.mock("@/app/actions/shopping", () => ({
+  generateShoppingList: mocks.generateShoppingList,
+  setShoppingItemStatus: mocks.setShoppingItemStatus,
+}));
 
 import { ShoppingListView } from "@/components/shopping/shopping-list-view";
 
 describe("ShoppingListView", () => {
   beforeEach(() => {
     mocks.generateShoppingList.mockReset();
+    mocks.setShoppingItemStatus.mockReset();
+    mocks.setShoppingItemStatus.mockImplementation(async (_state, formData: FormData) => ({
+      error: null,
+      status: formData.get("status"),
+      success: true,
+    }));
     clipboardWriteText.mockReset();
     clipboardWriteText.mockResolvedValue(undefined);
   });
@@ -59,19 +68,23 @@ describe("ShoppingListView", () => {
     expect(screen.getByText("750 g")).toBeInTheDocument();
     expect(screen.getByText("Quantity needs review")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Review before buying" })).toBeInTheDocument();
-    expect(screen.queryByText("ignored")).not.toBeInTheDocument();
+    expect(screen.getByText("ignored")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore ignored" })).toBeInTheDocument();
 
     const riceCheckbox = screen.getByRole("checkbox", { name: "Mark rice as checked" });
     await user.click(riceCheckbox);
-    expect(riceCheckbox).toBeChecked();
-    expect(screen.getByText("rice")).toHaveClass("line-through");
+    expect(mocks.setShoppingItemStatus).toHaveBeenCalledOnce();
+    const submittedStatus = mocks.setShoppingItemStatus.mock.calls[0][1] as FormData;
+    expect(submittedStatus.get("itemId")).toBe("rice");
+    expect(submittedStatus.get("status")).toBe("checked");
 
     await user.click(screen.getByRole("button", { name: "Copy plain text" }));
-    expect(clipboardWriteText).toHaveBeenCalledWith("- rice: 750 g\n- herbs [review]\n- ignored: 1 each");
+    expect(clipboardWriteText).toHaveBeenCalledWith("- rice: 750 g\n- herbs [review]");
     expect(screen.getByText("Shopping list copied.")).toBeInTheDocument();
 
     const download = screen.getByRole("link", { name: "Download plain text" });
     expect(download).toHaveAttribute("download", "shopping-list.txt");
     expect(decodeURIComponent(download.getAttribute("href") ?? "")).toContain("- rice: 750 g");
+    expect(decodeURIComponent(download.getAttribute("href") ?? "")).not.toContain("ignored");
   });
 });

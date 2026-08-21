@@ -12,7 +12,8 @@ describe("unit conversion", () => {
     expect(normalizeSupportedUnit("cloves")).toBe("clove");
     expect(normalizeSupportedUnit("bunches")).toBe("bunch");
     expect(normalizeSupportedUnit("slices")).toBe("slice");
-    expect(normalizeSupportedUnit("pinch")).toBeNull();
+    expect(normalizeSupportedUnit("pieces")).toBe("piece");
+    expect(normalizeSupportedUnit("pinches")).toBe("pinch");
   });
 
   it("converts mass within the same dimension", () => {
@@ -38,5 +39,11 @@ describe("unit conversion", () => {
       reason: "Cannot convert can to packet",
     });
     expect(convertQuantity(2, "cans", "can")).toEqual({ ok: true, quantity: 2, unit: "can" });
+    expect(convertQuantity(2, "pieces", "piece")).toEqual({ ok: true, quantity: 2, unit: "piece" });
+    expect(convertQuantity(3, "pinches", "pinch")).toEqual({ ok: true, quantity: 3, unit: "pinch" });
+    expect(convertQuantity(1, "piece", "pinch")).toEqual({
+      ok: false,
+      reason: "Cannot convert piece to pinch",
+    });
   });
 });

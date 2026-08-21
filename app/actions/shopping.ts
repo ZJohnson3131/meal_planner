@@ -1,12 +1,22 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 
 import { requireHousehold } from "@/lib/auth/household";
 import { aggregateIngredients } from "@/lib/domain/ingredient-aggregation";
 import { calculatePantryDelta } from "@/lib/domain/pantry-delta";
 import { createClient } from "@/lib/supabase/server";
-import { shoppingListRangeSchema } from "@/lib/validation/shopping";
+import {
+  shoppingItemStatusInputSchema,
+  shoppingListRangeSchema,
+} from "@/lib/validation/shopping";
+
+export type ShoppingItemFormState = {
+  error: string | null;
+  success: boolean;
+  status?: "needed" | "checked" | "dismissed";
+};
 
 /**
  * Generates a household-owned snapshot from planned Dinner entries. A new
@@ -14,7 +24,6 @@ import { shoppingListRangeSchema } from "@/lib/validation/shopping";
  * accurate record of the pantry/planning state at the time they were made.
  */
 export async function generateShoppingList(formData: FormData) {
-  const { householdId } = await requireHousehold();
   const parsedRange = shoppingListRangeSchema.safeParse({
     startDate: formData.get("startDate"),
     endDate: formData.get("endDate"),
@@ -23,6 +32,7 @@ export async function generateShoppingList(formData: FormData) {
     throw new Error("Shopping-list dates are invalid");
   }
 
+  const { householdId } = await requireHousehold();
   const supabase = await createClient();
 
   // The MVP only plans dinners. Constraining the read to the household's
@@ -109,39 +119,63 @@ export async function generateShoppingList(formData: FormData) {
     (delta) => delta.reviewRequired || (delta.deltaQuantity !== null && delta.deltaQuantity > 0),
   );
 
-  const { data: shoppingList, error: shoppingListError } = await supabase
-    .from("shopping_lists")
-    .insert({
-      household_id: householdId,
-      name: `Shopping list ${parsedRange.data.startDate} to ${parsedRange.data.endDate}`,
-      start_date: parsedRange.data.startDate,
-      end_date: parsedRange.data.endDate,
-      status: "active",
-    })
-    .select("id")
-    .single();
-  if (shoppingListError || !shoppingList) {
-    throw new Error("Failed to create shopping list");
-  }
-
-  if (shoppingItems.length > 0) {
-    const { error: itemsError } = await supabase.from("shopping_list_items").insert(
-      shoppingItems.map((delta) => ({
-        shopping_list_id: shoppingList.id,
-        item_name: delta.itemName,
-        required_quantity: delta.requiredQuantity,
-        pantry_quantity: delta.pantryQuantity,
-        delta_quantity: delta.deltaQuantity,
+  const { error: shoppingListError } = await supabase.rpc(
+    "create_shopping_list_with_items",
+    {
+      p_end_date: parsedRange.data.endDate,
+      p_household_id: householdId,
+      p_items: shoppingItems.map((delta) => ({
+        deltaQuantity: delta.deltaQuantity,
+        itemName: delta.itemName,
+        pantryQuantity: delta.pantryQuantity,
+        requiredQuantity: delta.requiredQuantity,
+        reviewReason: delta.reviewReason,
+        reviewRequired: delta.reviewRequired,
         unit: delta.unit,
-        status: "needed",
-        review_required: delta.reviewRequired,
-        review_reason: delta.reviewReason,
       })),
-    );
-    if (itemsError) {
-      throw new Error("Failed to save shopping-list items");
-    }
+      p_start_date: parsedRange.data.startDate,
+    },
+  );
+  if (shoppingListError) {
+    throw new Error("We could not generate this shopping list. Refresh the page and try again.");
   }
 
   revalidatePath("/shopping");
+}
+
+/** Persists one shopping-item status through the household-authorized RPC. */
+export async function setShoppingItemStatus(
+  _previousState: ShoppingItemFormState,
+  formData: FormData,
+): Promise<ShoppingItemFormState> {
+  const parsedInput = shoppingItemStatusInputSchema.safeParse({
+    itemId: formData.get("itemId"),
+    status: formData.get("status"),
+  });
+  if (!parsedInput.success) {
+    return { error: "The shopping item update was invalid.", success: false };
+  }
+
+  try {
+    await requireHousehold();
+    const supabase = await createClient();
+    const { error } = await supabase.rpc("set_shopping_item_status", {
+      p_item_id: parsedInput.data.itemId,
+      p_status: parsedInput.data.status,
+    });
+    if (error) throw error;
+
+    revalidatePath("/shopping");
+    return {
+      error: null,
+      status: parsedInput.data.status,
+      success: true,
+    };
+  } catch (error) {
+    unstable_rethrow(error);
+    return {
+      error: "We could not save this shopping item. Refresh the list and try again.",
+      success: false,
+    };
+  }
 }

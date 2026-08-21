@@ -9,6 +9,11 @@ import {
   reverseCompletedMeal,
 } from "@/app/actions/meal-plans";
 import { CompletionDialog } from "@/components/meal-planner/completion-dialog";
+import {
+  calendarDateToNeutralDate,
+  calendarWeekDates,
+  calendarWeekRange,
+} from "@/lib/domain/calendar";
 
 export type PlannerRecipe = {
   id: string;
@@ -30,42 +35,26 @@ type WeeklyDinnerPlannerProps = {
   weekStart: string;
 };
 
-function dateFromIso(isoDate: string) {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function isoDateFromUtcDate(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
 function getWeekDays(weekStart: string) {
-  const start = dateFromIso(weekStart);
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(start);
-    date.setUTCDate(start.getUTCDate() + index);
-    return {
-      isoDate: isoDateFromUtcDate(date),
+  return calendarWeekDates(weekStart).map((isoDate) => ({
+      isoDate,
       label: new Intl.DateTimeFormat("en-AU", {
         weekday: "long",
         day: "numeric",
         month: "long",
         timeZone: "UTC",
-      }).format(date),
-    };
-  });
+      }).format(calendarDateToNeutralDate(isoDate)),
+    }));
 }
 
 function formatWeekRange(weekStart: string) {
-  const start = dateFromIso(weekStart);
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
+  const { startDate, endDate } = calendarWeekRange(weekStart);
   const formatter = new Intl.DateTimeFormat("en-AU", {
     day: "numeric",
     month: "short",
     timeZone: "UTC",
   });
-  return `${formatter.format(start)} – ${formatter.format(end)}`;
+  return `${formatter.format(calendarDateToNeutralDate(startDate))} – ${formatter.format(calendarDateToNeutralDate(endDate))}`;
 }
 
 function SubmitButton({ children, pendingText, tone = "primary" }: { children: string; pendingText: string; tone?: "primary" | "secondary" | "danger" }) {

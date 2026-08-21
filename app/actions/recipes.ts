@@ -5,11 +5,19 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { requireHousehold } from "@/lib/auth/household";
+import { RECIPE_IMPORT_LIMITS } from "@/lib/recipes/recipe-import-contract";
 import { createClient } from "@/lib/supabase/server";
 import { recipeSchema } from "@/lib/validation/recipes";
 
 const ingestionStatusSchema = z.enum(["manual", "parsed", "needs_review", "failed"]);
 const recipeIdSchema = z.string().uuid();
+const recipeActionSchema = recipeSchema.extend({
+  ingredients: recipeSchema.shape.ingredients.element
+    .extend({ id: z.string().uuid().nullable().optional() })
+    .array()
+    .min(1)
+    .max(RECIPE_IMPORT_LIMITS.ingredients),
+});
 
 function nullableText(value: FormDataEntryValue | null): string | null {
   const text = typeof value === "string" ? value.trim() : "";
@@ -21,8 +29,9 @@ function formDataToRecipeInput(formData: FormData) {
   const quantities = formData.getAll("ingredientQuantity");
   const units = formData.getAll("ingredientUnit");
   const notes = formData.getAll("ingredientNotes");
+  const ids = formData.getAll("ingredientId");
 
-  return recipeSchema.safeParse({
+  return recipeActionSchema.safeParse({
     title: formData.get("title"),
     description: nullableText(formData.get("description")),
     sourceUrl: nullableText(formData.get("sourceUrl")),
@@ -31,6 +40,7 @@ function formDataToRecipeInput(formData: FormData) {
     instructions: formData.get("instructions"),
     ingredients: ingredientNames
       .map((itemName, index) => ({
+        id: nullableText(ids[index] ?? null),
         itemName,
         quantity: nullableText(quantities[index] ?? null),
         unit: nullableText(units[index] ?? null),
@@ -56,46 +66,31 @@ export async function createRecipe(formData: FormData) {
   const supabase = await createClient();
   const recipeInput = parsedRecipe.data;
 
-  const { data: recipe, error } = await supabase
-    .from("recipes")
-    .insert({
-      household_id: householdId,
-      title: recipeInput.title,
+  const { data, error } = await supabase.rpc("create_recipe_with_ingredients", {
+    p_household_id: householdId,
+    p_ingredients: recipeInput.ingredients.map(({ itemName, notes, quantity, unit }) => ({
+      itemName,
+      notes: notes ?? null,
+      quantity,
+      unit,
+    })),
+    p_recipe: {
       description: recipeInput.description ?? null,
-      source_url: recipeInput.sourceUrl ?? null,
       favorite: recipeInput.favorite,
-      servings: recipeInput.servings ?? null,
+      ingestionStatus: parsedStatus.data,
       instructions: recipeInput.instructions,
-      ingestion_status: parsedStatus.data,
-    })
-    .select("id")
-    .single();
-
-  if (error || !recipe) {
-    throw new Error("Failed to create recipe");
-  }
-
-  const ingredients = recipeInput.ingredients.map((ingredient, displayOrder) => ({
-    recipe_id: recipe.id,
-    item_name: ingredient.itemName,
-    quantity: ingredient.quantity,
-    unit: ingredient.unit,
-    notes: ingredient.notes ?? null,
-    display_order: displayOrder,
-  }));
-
-  const { error: ingredientError } = await supabase
-    .from("recipe_ingredients")
-    .insert(ingredients);
-  if (ingredientError) {
-    // Supabase's REST insert cannot span these two tables as one transaction.
-    // Best-effort cleanup avoids leaving a partial recipe behind on an ingredient failure.
-    await supabase.from("recipes").delete().eq("id", recipe.id).eq("household_id", householdId);
-    throw new Error("Failed to create recipe ingredients");
+      servings: recipeInput.servings ?? null,
+      sourceUrl: recipeInput.sourceUrl ?? null,
+      title: recipeInput.title,
+    },
+  });
+  const createdRecipeId = recipeIdSchema.safeParse(data);
+  if (error || !createdRecipeId.success) {
+    throw new Error("We could not create this recipe. Check the details and try again.");
   }
 
   revalidatePath("/recipes");
-  redirect(`/recipes/${recipe.id}`);
+  redirect(`/recipes/${createdRecipeId.data}`);
 }
 
 /**
@@ -116,85 +111,43 @@ export async function updateRecipe(recipeId: string, formData: FormData) {
   const supabase = await createClient();
   const { data: existingRecipe, error: existingError } = await supabase
     .from("recipes")
-    .select("id, title, description, source_url, favorite, servings, instructions, ingestion_status, recipe_ingredients(item_name, quantity, unit, notes, display_order)")
+    .select("id, description")
     .eq("id", parsedId.data)
     .eq("household_id", householdId)
     .maybeSingle();
 
-  if (existingError) throw new Error("Failed to load recipe for update");
-  if (!existingRecipe) throw new Error("Recipe not found");
+  if (existingError || !existingRecipe) {
+    throw new Error("We could not load this recipe. Refresh the page and try again.");
+  }
 
-  const recipe = existingRecipe;
   const recipeInput = parsedRecipe.data;
-  const oldIngredients = recipe.recipe_ingredients ?? [];
-  const replacementIngredients = recipeInput.ingredients.map((ingredient, displayOrder) => ({
-    recipe_id: recipe.id,
-    item_name: ingredient.itemName,
-    quantity: ingredient.quantity,
-    unit: ingredient.unit,
-    notes: ingredient.notes ?? null,
-    display_order: displayOrder,
-  }));
-
-  async function restoreIngredients() {
-    const { error: deleteError } = await supabase
-      .from("recipe_ingredients")
-      .delete()
-      .eq("recipe_id", recipe.id);
-    if (deleteError) return deleteError;
-    if (oldIngredients.length === 0) return null;
-
-    const { error: insertError } = await supabase.from("recipe_ingredients").insert(
-      oldIngredients.map((ingredient) => ({
-        recipe_id: recipe.id,
-        item_name: ingredient.item_name,
-        quantity: ingredient.quantity,
-        unit: ingredient.unit,
-        notes: ingredient.notes,
-        display_order: ingredient.display_order,
-      })),
-    );
-    return insertError;
-  }
-
-  const { error: deleteError } = await supabase
-    .from("recipe_ingredients")
-    .delete()
-    .eq("recipe_id", recipe.id);
-  if (deleteError) {
-    throw new Error("Failed to replace recipe ingredients");
-  }
-
-  const { error: insertError } = await supabase.from("recipe_ingredients").insert(replacementIngredients);
-  if (insertError) {
-    const restoreError = await restoreIngredients();
-    if (restoreError) throw new Error("Failed to update recipe ingredients and restore the original recipe");
-    throw new Error("Failed to update recipe ingredients");
-  }
-
-  const { error: updateError } = await supabase
-    .from("recipes")
-    .update({
-      title: recipeInput.title,
-      // The current form does not expose a description field. Preserve it until
-      // the form explicitly supplies one rather than wiping imported text.
-      description: formData.has("description") ? recipeInput.description ?? null : recipe.description,
-      source_url: recipeInput.sourceUrl ?? null,
+  const { error: updateError } = await supabase.rpc("update_recipe_with_ingredients", {
+    p_ingredients: recipeInput.ingredients.map(({ id, itemName, notes, quantity, unit }) => ({
+      id: id ?? null,
+      itemName,
+      notes: notes ?? null,
+      quantity,
+      unit,
+    })),
+    p_recipe_id: existingRecipe.id,
+    p_recipe: {
+      description: formData.has("description")
+        ? recipeInput.description ?? null
+        : existingRecipe.description,
       favorite: recipeInput.favorite,
-      servings: recipeInput.servings ?? null,
+      ingestionStatus: parsedStatus.data,
       instructions: recipeInput.instructions,
-      ingestion_status: parsedStatus.data,
-    })
-    .eq("id", recipe.id)
-    .eq("household_id", householdId);
+      servings: recipeInput.servings ?? null,
+      sourceUrl: recipeInput.sourceUrl ?? null,
+      title: recipeInput.title,
+    },
+  });
 
   if (updateError) {
-    const restoreError = await restoreIngredients();
-    if (restoreError) throw new Error("Failed to update recipe and restore the original ingredients");
-    throw new Error("Failed to update recipe");
+    throw new Error("We could not update this recipe. Refresh the page and try again.");
   }
 
   revalidatePath("/recipes");
-  revalidatePath(`/recipes/${recipe.id}`);
-  redirect(`/recipes/${recipe.id}`);
+  revalidatePath(`/recipes/${existingRecipe.id}`);
+  redirect(`/recipes/${existingRecipe.id}`);
 }

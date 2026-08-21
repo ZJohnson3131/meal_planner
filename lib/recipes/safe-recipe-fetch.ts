@@ -5,9 +5,22 @@ import type { IncomingHttpHeaders } from "node:http";
 import * as https from "node:https";
 import { isIP } from "node:net";
 
-const MAX_REDIRECTS = 3;
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 10_000;
+import {
+  assertRecipeImportTime,
+  createRecipeImportBudget,
+  RECIPE_IMPORT_LIMITS,
+  remainingRecipeImportTime,
+  type RecipeImportBudget,
+  withinRecipeImportTime,
+} from "@/lib/recipes/recipe-import-contract";
+
+const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+const RECIPE_HTML_MEDIA_TYPES = new Set(["application/xhtml+xml", "text/html"]);
+
+function isRecipeHtml(headers: IncomingHttpHeaders): boolean {
+  const contentType = headers["content-type"]?.toLowerCase() ?? "";
+  return RECIPE_HTML_MEDIA_TYPES.has(contentType.split(";", 1)[0].trim());
+}
 
 // Many public recipe sites return an interstitial document (often still HTTP
 // 200) to Node's default request profile. These are ordinary browser navigation
@@ -74,7 +87,9 @@ function isPublicAddress(address: string, family: number): boolean {
 export async function validateRecipeUrl(
   rawUrl: string,
   resolveDns: typeof lookup = lookup,
+  budget: RecipeImportBudget = createRecipeImportBudget(),
 ): Promise<{ url: URL; address: ResolvedAddress }> {
+  assertRecipeImportTime(budget);
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -83,6 +98,7 @@ export async function validateRecipeUrl(
   }
 
   if (
+    rawUrl.length > RECIPE_IMPORT_LIMITS.sourceUrlCharacters ||
     url.protocol !== "https:" ||
     url.username ||
     url.password ||
@@ -92,12 +108,16 @@ export async function validateRecipeUrl(
   ) {
     throw new RecipeFetchError("Unsupported recipe URL");
   }
+  url.hash = "";
 
   const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
   const literalFamily = isIP(hostname);
   const resolvedAddresses = literalFamily
     ? [{ address: hostname, family: literalFamily as 4 | 6 }]
-    : await resolveDns(hostname, { all: true, verbatim: true });
+    : await withinRecipeImportTime(
+        budget,
+        resolveDns(hostname, { all: true, verbatim: true }),
+      );
   const addresses = resolvedAddresses.filter(
     (candidate): candidate is ResolvedAddress => candidate.family === 4 || candidate.family === 6,
   );
@@ -109,8 +129,18 @@ export async function validateRecipeUrl(
   return { url, address: addresses[0] };
 }
 
-function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
+function requestHtml(
+  url: URL,
+  address: ResolvedAddress,
+  budget: RecipeImportBudget,
+): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
+    const remainingMs = remainingRecipeImportTime(budget);
+    if (remainingMs <= 0) {
+      reject(new RecipeFetchError("Recipe import timed out"));
+      return;
+    }
+
     const deadline: { timer: ReturnType<typeof setTimeout> | undefined } = { timer: undefined };
     const clearDeadline = () => {
       if (deadline.timer) clearTimeout(deadline.timer);
@@ -122,11 +152,28 @@ function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: 
         lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
       },
       (response) => {
+        const statusCode = response.statusCode ?? 500;
+
+        // Redirect/error bodies and unsupported media are not recipe input.
+        // Stop immediately instead of spending the shared budget downloading
+        // content the caller will reject from headers alone.
+        if (
+          REDIRECT_STATUS_CODES.has(statusCode)
+          || statusCode < 200
+          || statusCode >= 300
+          || !isRecipeHtml(response.headers)
+        ) {
+          clearDeadline();
+          response.destroy();
+          resolve({ statusCode, headers: response.headers, body: "" });
+          return;
+        }
+
         const chunks: Buffer[] = [];
         let size = 0;
         const contentLength = Number(response.headers["content-length"] ?? 0);
 
-        if (contentLength > MAX_RESPONSE_BYTES) {
+        if (Number.isFinite(contentLength) && contentLength > RECIPE_IMPORT_LIMITS.htmlBytes) {
           clearDeadline();
           response.destroy();
           reject(new RecipeFetchError("Recipe response is too large"));
@@ -135,7 +182,7 @@ function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: 
 
         response.on("data", (chunk: Buffer) => {
           size += chunk.length;
-          if (size > MAX_RESPONSE_BYTES) {
+          if (size > RECIPE_IMPORT_LIMITS.htmlBytes) {
             response.destroy(new RecipeFetchError("Recipe response is too large"));
             return;
           }
@@ -144,7 +191,7 @@ function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: 
         response.on("end", () => {
           clearDeadline();
           resolve({
-            statusCode: response.statusCode ?? 500,
+            statusCode,
             headers: response.headers,
             body: Buffer.concat(chunks).toString("utf8"),
           });
@@ -157,8 +204,8 @@ function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: 
     );
 
     deadline.timer = setTimeout(
-      () => request.destroy(new RecipeFetchError("Recipe request timed out")),
-      REQUEST_TIMEOUT_MS,
+      () => request.destroy(new RecipeFetchError("Recipe import timed out")),
+      remainingMs,
     );
     request.on("error", (error) => {
       clearDeadline();
@@ -168,16 +215,24 @@ function requestHtml(url: URL, address: ResolvedAddress): Promise<{ statusCode: 
   });
 }
 
-export async function fetchRecipeHtml(initialUrl: string): Promise<{ html: string; finalUrl: string }> {
+export async function fetchRecipeHtml(
+  initialUrl: string,
+  budget: RecipeImportBudget = createRecipeImportBudget(),
+): Promise<{ html: string; finalUrl: string; budget: RecipeImportBudget }> {
   let candidateUrl = initialUrl;
 
-  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    const { url, address } = await validateRecipeUrl(candidateUrl);
-    const response = await requestHtml(url, address);
+  for (
+    let redirectCount = 0;
+    redirectCount <= RECIPE_IMPORT_LIMITS.redirects;
+    redirectCount += 1
+  ) {
+    assertRecipeImportTime(budget);
+    const { url, address } = await validateRecipeUrl(candidateUrl, lookup, budget);
+    const response = await requestHtml(url, address, budget);
 
-    if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+    if (REDIRECT_STATUS_CODES.has(response.statusCode)) {
       const location = response.headers.location;
-      if (!location || redirectCount === MAX_REDIRECTS) {
+      if (!location || redirectCount === RECIPE_IMPORT_LIMITS.redirects) {
         throw new RecipeFetchError("Recipe redirect failed");
       }
       candidateUrl = new URL(location, url).toString();
@@ -188,12 +243,12 @@ export async function fetchRecipeHtml(initialUrl: string): Promise<{ html: strin
       throw new RecipeFetchError("Recipe request failed");
     }
 
-    const contentType = response.headers["content-type"]?.toLowerCase() ?? "";
-    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
+    if (!isRecipeHtml(response.headers)) {
       throw new RecipeFetchError("Recipe response is not HTML");
     }
 
-    return { html: response.body, finalUrl: url.toString() };
+    assertRecipeImportTime(budget);
+    return { html: response.body, finalUrl: url.toString(), budget };
   }
 
   throw new RecipeFetchError("Recipe redirect failed");
