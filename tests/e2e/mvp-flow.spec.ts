@@ -12,7 +12,7 @@ async function openPlannerWeek(page: Page, appNav: Locator) {
   const dateInput = page.getByLabel("Date in the week");
   await dateInput.fill(TEST_WEEK_DATE);
   await page.getByRole("button", { name: "View week" }).click();
-  await expect(page.getByLabel("Recipe").first()).toBeVisible();
+  await expect(page.getByLabel("Recipe", { exact: true }).first()).toBeVisible();
 }
 
 test("landing page exposes auth entry points", async ({ page }) => {
@@ -79,7 +79,7 @@ test("a household can plan, shop for, and complete a dinner exactly once", async
   await expect(page.getByText("200 g Rice (rinsed and drained)", { exact: true })).toBeVisible();
 
   await openPlannerWeek(page, appNav);
-  await page.getByLabel("Recipe").first().selectOption({ label: recipeTitle });
+  await page.getByLabel("Recipe", { exact: true }).first().selectOption({ label: recipeTitle });
   await page.getByRole("button", { name: "Plan dinner" }).first().click();
   await expect(page.getByText("Planned", { exact: true }).first()).toBeVisible();
 
