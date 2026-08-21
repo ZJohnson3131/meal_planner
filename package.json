@@ -16,7 +16,7 @@
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local --schema public > lib/supabase/database.types.ts",
-    "db:types:check": "node -e \"const { readFileSync } = require('node:fs'); const { spawnSync } = require('node:child_process'); const result = spawnSync('supabase gen types typescript --local --schema public', { encoding: 'utf8', shell: true }); if (result.status !== 0) { process.stderr.write(result.stderr || 'Database type generation failed.\\n'); process.exit(result.status ?? 1); } const normalize = (value) => value.replace(/\\r\\n/g, '\\n'); if (normalize(result.stdout) !== normalize(readFileSync('lib/supabase/database.types.ts', 'utf8'))) { console.error('Generated database types are stale. Run npm run db:types.'); process.exit(1); }\"",
+    "db:types:check": "node -e \"const { readFileSync } = require('node:fs'); const { spawnSync } = require('node:child_process'); const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'; const result = spawnSync(npx, ['--no-install', 'supabase', 'gen', 'types', 'typescript', '--local', '--schema', 'public'], { encoding: 'utf8', shell: process.platform === 'win32' }); if (result.status !== 0) { process.stderr.write(result.stderr || 'Database type generation failed.\\n'); process.exit(result.status ?? 1); } const normalize = (value) => value.replace(/\\r\\n/g, '\\n').trimEnd(); if (normalize(result.stdout) !== normalize(readFileSync('lib/supabase/database.types.ts', 'utf8'))) { console.error('Generated database types are stale. Run npm run db:types.'); process.exit(1); }\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
