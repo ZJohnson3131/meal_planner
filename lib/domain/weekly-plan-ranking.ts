@@ -20,7 +20,7 @@ export type SavedRecipeRankingOptions = {
 
 const STOP_WORDS = new Set([
   "a", "an", "and", "are", "avoid", "avoids", "do", "does", "for", "has", "have",
-  "i", "like", "likes", "me", "my", "not", "of", "or", "the", "to", "with",
+  "i", "like", "likes", "me", "my", "not", "of", "or", "the", "to", "with", "but",
 ]);
 
 const GOAL_TERMS: Record<string, string[]> = {
@@ -45,10 +45,21 @@ function searchTerms(value: string): string[] {
 function preferenceTerms(value: string | null | undefined): { positive: string[]; negative: string[] } {
   const positive: string[] = [];
   const negative: string[] = [];
+  const markerPattern = /\b(?:likes?|loves?|enjoys?|prefers?)\b|\b(?:avoid(?:s)?|dislikes?|hates?|without|no)\b|\b(?:do(?:es)? not|do(?:es)?n't)\s+like\b/gi;
   for (const clause of (value ?? "").split(/[,.!?;]+/)) {
-    const negativeClause = /\b(?:avoid|avoids|dislike|dislikes|hate|hates|without)\b/i.test(clause);
-    const terms = searchTerms(clause);
-    (negativeClause ? negative : positive).push(...terms);
+    const markers = [...clause.matchAll(markerPattern)];
+    if (markers.length === 0) {
+      positive.push(...searchTerms(clause));
+      continue;
+    }
+
+    markers.forEach((marker, index) => {
+      const start = (marker.index ?? 0) + marker[0].length;
+      const end = markers[index + 1]?.index ?? clause.length;
+      const terms = searchTerms(clause.slice(start, end));
+      const negativeMarker = /^(?:avoid|dislike|hate|without|no|do(?:es)? not|do(?:es)?n't)/i.test(marker[0]);
+      (negativeMarker ? negative : positive).push(...terms);
+    });
   }
   return {
     positive: [...new Set(positive)],
@@ -85,8 +96,8 @@ export function rankSavedRecipes<T extends RankableSavedRecipe>(
     .filter((recipe) => !exclusions.some((exclusion) => [recipe.title, recipe.description ?? "", ...recipe.ingredientNames].join(" ").toLocaleLowerCase().includes(exclusion)))
     .sort((left, right) => {
       if (left.preferenceScore !== right.preferenceScore) return right.preferenceScore - left.preferenceScore;
-      if (options.preferFavorites && left.favorite !== right.favorite) return left.favorite ? -1 : 1;
       if (left.reviewRequired !== right.reviewRequired) return left.reviewRequired ? 1 : -1;
+      if (options.preferFavorites && left.favorite !== right.favorite) return left.favorite ? -1 : 1;
       return left.title.localeCompare(right.title, undefined, { sensitivity: "base" }) || left.id.localeCompare(right.id);
     })
     .map((recipe) => {

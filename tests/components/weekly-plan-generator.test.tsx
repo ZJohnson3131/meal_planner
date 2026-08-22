@@ -94,8 +94,15 @@ describe("WeeklyPlanGenerator", () => {
     await user.click(screen.getByRole("button", { name: "Generate dinner proposal" }));
     const card = (await screen.findByRole("heading", { name: "Empty dinner slot" })).closest("article")!;
     await user.type(within(card).getByLabelText("Recipe title"), "Manual dinner");
+    await user.type(within(card).getByLabelText("Why this recipe fits"), "A manually completed dinner.");
+    await user.type(within(card).getByLabelText("Ingredient 1 name"), "Pasta");
+    await user.type(within(card).getByLabelText("Method"), "Cook and serve.");
 
     expect(screen.getByRole("heading", { name: "Manual dinner" })).toBeInTheDocument();
-    expect(within(card).getByRole("checkbox", { name: "Accept this dinner" })).toBeInTheDocument();
+    await user.click(within(card).getByRole("checkbox", { name: "Accept this dinner" }));
+    await user.click(screen.getByRole("button", { name: "Confirm and save 1 dinner" }));
+    expect(mocks.confirmWeeklyPlan).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ source: "generated", plannedFor: "2026-06-15" })],
+    }));
   });
 });

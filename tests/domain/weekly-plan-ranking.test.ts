@@ -49,6 +49,19 @@ describe("rankSavedRecipes", () => {
     expect(ranked.find((recipe) => recipe.id === "disliked")?.reviewRequired).toBe(true);
   });
 
+  test("separates liked and disliked terms in one sentence", () => {
+    const ranked = rankSavedRecipes([
+      { id: "liked", title: "Chicken stir fry", description: null, favorite: false, ingredientNames: ["chicken"] },
+      { id: "disliked", title: "Mushroom pasta", description: null, favorite: false, ingredientNames: ["mushrooms"] },
+    ], {
+      preferFavorites: false,
+      dietaryExclusions: [],
+      likesDislikes: "likes chicken but dislikes mushrooms",
+    });
+
+    expect(ranked.map((recipe) => recipe.id)).toEqual(["liked", "disliked"]);
+  });
+
   test("flags saved recipes without timing metadata when a cooking limit is supplied", () => {
     const ranked = rankSavedRecipes([
       { id: "unknown", title: "Pasta", description: null, favorite: false, ingredientNames: [] },
@@ -61,5 +74,18 @@ describe("rankSavedRecipes", () => {
 
     expect(ranked.map((recipe) => recipe.id)).toEqual(["known", "unknown"]);
     expect(ranked.find((recipe) => recipe.id === "unknown")?.reviewRequired).toBe(true);
+  });
+
+  test("keeps known-compliant timing ahead of an unknown-time favourite", () => {
+    const ranked = rankSavedRecipes([
+      { id: "unknown-favorite", title: "Pasta", description: null, favorite: true, ingredientNames: [] },
+      { id: "known", title: "Soup", description: null, favorite: false, ingredientNames: [], estimatedMinutes: 20 },
+    ], {
+      preferFavorites: true,
+      dietaryExclusions: [],
+      maxCookingMinutes: 30,
+    });
+
+    expect(ranked.map((recipe) => recipe.id)).toEqual(["known", "unknown-favorite"]);
   });
 });
