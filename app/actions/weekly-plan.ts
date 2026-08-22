@@ -7,6 +7,7 @@ import { rankSavedRecipes, type RankableSavedRecipe } from "@/lib/domain/weekly-
 import { normalizeSupportedUnit, type SupportedCookingUnit } from "@/lib/domain/units";
 import type {
   GeneratedRecipeDraft,
+  WeeklyPlanEmptySlot,
   WeeklyPlanProposal,
   WeeklyPlanProposalItem,
 } from "@/lib/domain/weekly-plan-types";
@@ -21,6 +22,7 @@ import { generateWithOllama, getOllamaReadiness, OllamaGenerationError } from "@
 
 export type {
   GeneratedRecipeDraft,
+  WeeklyPlanEmptySlot,
   WeeklyPlanPreferences,
   WeeklyPlanProposal,
   WeeklyPlanProposalItem,
@@ -35,6 +37,23 @@ type SavedRecipeRecord = RankableSavedRecipe & {
 function weekDates(weekStart: string, count: number): string[] {
   const start = Date.parse(`${weekStart}T00:00:00Z`);
   return Array.from({ length: count }, (_, index) => new Date(start + index * 86_400_000).toISOString().slice(0, 10));
+}
+
+function emptySlotItems(dates: string[], offset: number, count: number, reason: string): WeeklyPlanEmptySlot[] {
+  return dates.slice(offset, offset + count).map((plannedFor) => ({
+    plannedFor,
+    source: "empty" as const,
+    draft: {
+      title: "",
+      servings: 1,
+      estimatedMinutes: null,
+      rationale: "",
+      ingredients: [{ itemName: "", quantity: null, unit: null, notes: null }],
+      instructions: "",
+    },
+    reason,
+    reviewRequired: true as const,
+  }));
 }
 
 function buildPrompt(input: {
@@ -116,10 +135,36 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
   if (!missingSlots) return { items, emptySlots: 0, ollama: { status: "ready" } };
 
   const readiness = await getOllamaReadiness();
-  if (readiness.status !== "ready") return { items, emptySlots: missingSlots, ollama: readiness };
+  if (readiness.status !== "ready") {
+    return {
+      items: [...items, ...emptySlotItems(dates, selected.length, missingSlots, readiness.message)],
+      emptySlots: missingSlots,
+      ollama: readiness,
+    };
+  }
+
+  const drafts: GeneratedRecipeDraft[] = [];
+  const failedProposal = (message: string): WeeklyPlanProposal => ({
+    items: [
+      ...items,
+      ...drafts.map((draft, index) => ({
+        plannedFor: dates[selected.length + index],
+        source: "generated" as const,
+        draft,
+        reviewRequired: true as const,
+      })),
+      ...emptySlotItems(
+        dates,
+        selected.length + drafts.length,
+        missingSlots - drafts.length,
+        message,
+      ),
+    ],
+    emptySlots: missingSlots - drafts.length,
+    ollama: { status: "failed", message },
+  });
 
   try {
-    const drafts: GeneratedRecipeDraft[] = [];
     const selectedRecipeTitles = selected.map((recipe) => recipe.title).slice(0, 20);
     const pantryNames = (pantryResult.data ?? []).map((item) => item.item_name).slice(0, 50);
 
@@ -142,7 +187,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
         const validated = generatedDraftListSchema.safeParse(decoded);
         if (validated.success && validated.data.drafts.length === 1) draft = validated.data.drafts[0];
       }
-      if (!draft) return { items, emptySlots: missingSlots, ollama: { status: "failed", message: "Ollama returned an invalid recipe draft. You can add recipes manually or try again." } };
+      if (!draft) return failedProposal("Ollama returned an invalid recipe draft. Complete the empty dinner slots manually or try again.");
       drafts.push(draft);
     }
     return {
@@ -152,7 +197,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
     };
   } catch (error) {
     const message = error instanceof OllamaGenerationError ? error.message : "Ollama could not generate recipe drafts.";
-    return { items, emptySlots: missingSlots, ollama: { status: "failed", message } };
+    return failedProposal(message);
   }
 }
 

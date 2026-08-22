@@ -4,7 +4,6 @@
  */
 import type {
   GeneratedRecipeDraft,
-  WeeklyPlanPreferences,
   WeeklyPlanProposalItem,
 } from "@/lib/validation/weekly-plan";
 
@@ -15,6 +14,14 @@ export type {
   WeeklyPlanProposalItem,
 } from "@/lib/validation/weekly-plan";
 
+export type WeeklyPlanEmptySlot = {
+  plannedFor: string;
+  source: "empty";
+  draft: GeneratedRecipeDraft;
+  reason: string;
+  reviewRequired: true;
+};
+
 export type WeeklyPlanOllamaStatus =
   | { status: "ready" }
   | { status: "unavailable"; message: string }
@@ -22,7 +29,7 @@ export type WeeklyPlanOllamaStatus =
   | { status: "failed"; message: string };
 
 export type WeeklyPlanProposal = {
-  items: WeeklyPlanProposalItem[];
+  items: Array<WeeklyPlanProposalItem | WeeklyPlanEmptySlot>;
   emptySlots: number;
   ollama: WeeklyPlanOllamaStatus;
 };

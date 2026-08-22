@@ -77,4 +77,25 @@ describe("WeeklyPlanGenerator", () => {
       items: [expect.objectContaining({ plannedFor: "2026-06-15", source: "saved", recipeId: "c5568d22-0ac9-44d7-b4f4-39ee7c4b176a" })],
     }));
   });
+
+  test("renders failed-generation slots as editable draft fields", async () => {
+    const user = userEvent.setup();
+    mocks.generateWeeklyPlanProposal.mockResolvedValue({
+      items: [{
+        plannedFor: "2026-06-15", source: "empty", reviewRequired: true,
+        reason: "The local model is unavailable.",
+        draft: { title: "", servings: 1, estimatedMinutes: null, rationale: "", ingredients: [{ itemName: "", quantity: null, unit: null, notes: null }], instructions: "" },
+      }],
+      emptySlots: 1,
+      ollama: { status: "unavailable", message: "Start Ollama locally." },
+    });
+    render(<WeeklyPlanGenerator recipes={[]} weekStart="2026-06-15" />);
+
+    await user.click(screen.getByRole("button", { name: "Generate dinner proposal" }));
+    const card = (await screen.findByRole("heading", { name: "Empty dinner slot" })).closest("article")!;
+    await user.type(within(card).getByLabelText("Recipe title"), "Manual dinner");
+
+    expect(screen.getByRole("heading", { name: "Manual dinner" })).toBeInTheDocument();
+    expect(within(card).getByRole("checkbox", { name: "Accept this dinner" })).toBeInTheDocument();
+  });
 });

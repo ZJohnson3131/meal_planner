@@ -7,6 +7,7 @@ import type {
   WeeklyPlanPreferences,
   WeeklyPlanProposal,
   WeeklyPlanProposalItem,
+  WeeklyPlanEmptySlot,
   WeeklyPlanGoal,
 } from "@/lib/domain/weekly-plan-types";
 import { SUPPORTED_COOKING_UNITS } from "@/lib/domain/units";
@@ -31,6 +32,8 @@ const GOALS = [
 
 type DraftIngredient = GeneratedRecipeDraft["ingredients"][number];
 type ReviewItem = WeeklyPlanProposalItem & { accepted: boolean };
+type EmptyReviewItem = WeeklyPlanEmptySlot & { accepted: false };
+type AnyReviewItem = ReviewItem | EmptyReviewItem;
 
 function displayDate(value: string) {
   return new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })
@@ -46,6 +49,16 @@ function updateDraft(item: ReviewItem, patch: Partial<GeneratedRecipeDraft>): Re
   return { ...item, draft: { ...item.draft, ...patch } };
 }
 
+function promoteEmptySlot(item: EmptyReviewItem, patch: Partial<GeneratedRecipeDraft>): ReviewItem {
+  return {
+    plannedFor: item.plannedFor,
+    source: "generated",
+    draft: { ...item.draft, ...patch },
+    reviewRequired: true,
+    accepted: false,
+  };
+}
+
 /** Collects preferences, then holds the proposal entirely in UI state until explicit confirmation. */
 export function WeeklyPlanGeneratorClient({
   recipes,
@@ -54,7 +67,7 @@ export function WeeklyPlanGeneratorClient({
   generateWeeklyPlanProposal,
 }: WeeklyPlanGeneratorProps) {
   const [proposal, setProposal] = useState<WeeklyPlanProposal | null>(null);
-  const [items, setItems] = useState<ReviewItem[]>([]);
+  const [items, setItems] = useState<AnyReviewItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isGenerating, startGenerating] = useTransition();
@@ -80,7 +93,9 @@ export function WeeklyPlanGeneratorClient({
       try {
         const nextProposal = await generateWeeklyPlanProposal(preferences);
         setProposal(nextProposal);
-        setItems(nextProposal.items.map((item) => ({ ...item, accepted: true })));
+        setItems(nextProposal.items.map((item) => item.source === "empty"
+          ? { ...item, accepted: false as const }
+          : { ...item, accepted: true }));
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "We could not generate a weekly proposal. Please try again.");
       }
@@ -186,22 +201,22 @@ export function WeeklyPlanGeneratorClient({
   );
 }
 
-function ProposalCard({ item, index, onChange, onReplace, recipes }: { item: ReviewItem; index: number; onChange: (item: ReviewItem) => void; onReplace: (recipeId: string) => void; recipes: SavedRecipe[] }) {
-  const title = item.source === "generated" ? item.draft.title : item.savedRecipe.title;
-  const badge = item.source === "generated" ? "Generated draft" : "Saved recipe";
-  const badgeClass = item.source === "generated" ? "bg-violet-100 text-violet-900" : "bg-sky-100 text-sky-900";
-  const draft = item.source === "generated" ? item.draft : undefined;
-  const rationale = item.source === "generated" ? item.draft.rationale : item.rationale;
+function ProposalCard({ item, index, onChange, onReplace, recipes }: { item: AnyReviewItem; index: number; onChange: (item: AnyReviewItem) => void; onReplace: (recipeId: string) => void; recipes: SavedRecipe[] }) {
+  const title = item.source === "saved" ? item.savedRecipe.title : item.source === "generated" && item.draft.title ? item.draft.title : "Empty dinner slot";
+  const badge = item.source === "saved" ? "Saved recipe" : item.source === "generated" ? "Generated draft" : "Needs a recipe";
+  const badgeClass = item.source === "saved" ? "bg-sky-100 text-sky-900" : item.source === "generated" ? "bg-violet-100 text-violet-900" : "bg-amber-100 text-amber-900";
+  const draft = item.source === "generated" || item.source === "empty" ? item.draft : undefined;
+  const rationale = item.source === "generated" ? item.draft.rationale : item.source === "saved" ? item.rationale : item.reason;
   const savedDetails = item.source === "saved" ? item.savedRecipe : null;
   return <article className={`rounded-lg border bg-white p-4 shadow-sm ${item.accepted ? "border-slate-200" : "border-slate-200 opacity-70"}`}>
     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{displayDate(item.plannedFor)}</p><h3 className="mt-1 text-lg font-semibold text-slate-950">{title}</h3></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClass}`}>{badge}</span></div>
     {item.reviewRequired ? <p className="mt-3 rounded-md bg-amber-50 p-2 text-sm text-amber-900">This suggestion needs extra review against your stated preferences.</p> : null}
     <p className="mt-3 text-sm leading-6 text-slate-700"><span className="font-medium text-slate-900">Why it fits:</span> {rationale}</p>
-    {draft ? <DraftEditor draft={draft} onChange={(patch) => onChange(updateDraft(item, patch))} /> : savedDetails ? <SavedRecipeDetails recipe={savedDetails} /> : null}
+    {draft ? <DraftEditor draft={draft} onChange={(patch) => onChange(item.source === "empty" ? promoteEmptySlot(item, patch) : updateDraft(item, patch))} /> : savedDetails ? <SavedRecipeDetails recipe={savedDetails} /> : null}
     <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-      <label className="flex items-center gap-2 text-sm font-medium text-slate-800"><input checked={item.accepted} className="size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" onChange={(event) => onChange({ ...item, accepted: event.target.checked })} type="checkbox" />Accept this dinner</label>
+      {item.source !== "empty" ? <label className="flex items-center gap-2 text-sm font-medium text-slate-800"><input checked={item.accepted} className="size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" onChange={(event) => onChange({ ...item, accepted: event.target.checked })} type="checkbox" />Accept this dinner</label> : <p className="text-sm text-amber-900">Complete this editable recipe, or replace it with a saved recipe, before confirming.</p>}
       <label className="text-sm text-slate-700" htmlFor={`replace-${index}`}><span className="sr-only">Replace {title}</span><select className="rounded-md border border-slate-300 bg-white px-2 py-1.5" defaultValue="" id={`replace-${index}`} onChange={(event) => { if (event.target.value) onReplace(event.target.value); }}><option value="">Replace with saved recipe…</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.favorite ? "★ " : ""}{recipe.title}</option>)}</select></label>
-      <button className="text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950" onClick={() => onChange({ ...item, accepted: false })} type="button">Remove</button>
+      {item.source !== "empty" ? <button className="text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950" onClick={() => onChange({ ...item, accepted: false })} type="button">Remove</button> : null}
     </div>
   </article>;
 }

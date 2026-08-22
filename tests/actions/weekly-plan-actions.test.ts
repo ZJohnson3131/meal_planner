@@ -105,6 +105,23 @@ describe("weekly-plan actions", () => {
     expect(mocks.generateWithOllama.mock.calls[0][0]).toContain("No weekly goals were provided.");
   });
 
+  test("returns editable empty slots when Ollama returns invalid output", async () => {
+    mocks.createClient.mockResolvedValue({
+      from: vi.fn((table: string) => table === "recipes" ? emptySavedRecipeQuery() : pantryQuery()),
+      rpc: mocks.rpc,
+    });
+    mocks.generateWithOllama.mockResolvedValue("not-json");
+    const { generateWeeklyPlanProposal } = await import("@/app/actions/weekly-plan");
+
+    const proposal = await generateWeeklyPlanProposal(preferences());
+
+    expect(proposal.ollama.status).toBe("failed");
+    expect(proposal.emptySlots).toBe(2);
+    expect(proposal.items).toHaveLength(2);
+    expect(proposal.items.every((item) => item.source === "empty")).toBe(true);
+    expect(proposal.items.every((item) => item.source === "empty" && item.draft.title === "")).toBe(true);
+  });
+
   test("persists only confirmed reviewed items through the household-scoped atomic RPC", async () => {
     const { confirmWeeklyPlan } = await import("@/app/actions/weekly-plan");
 
