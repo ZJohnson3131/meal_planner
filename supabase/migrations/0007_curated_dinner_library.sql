@@ -1,3 +1,4 @@
+-- Runs after 0006_confirm_weekly_dinner_plan.sql so migration versions remain unique.
 -- Globally curated recipes are deliberately separate from household recipes.
 -- A household receives its own editable snapshot only through
 -- adopt_curated_recipe(), so personal edits never mutate the shared library.

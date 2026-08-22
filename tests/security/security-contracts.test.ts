@@ -92,7 +92,7 @@ describe("database hardening migration contract", () => {
   });
 
   test("keeps the globally curated catalogue read-only and adoption-authorized", async () => {
-    const sql = await source("supabase/migrations/0006_curated_dinner_library.sql");
+    const sql = await source("supabase/migrations/0007_curated_dinner_library.sql");
 
     for (const table of [
       "curated_recipe_collections",

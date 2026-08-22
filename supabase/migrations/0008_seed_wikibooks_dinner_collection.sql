@@ -1,4 +1,5 @@
--- A reviewed, attributed CC BY-SA 4.0 starter catalogue.  This migration is
+-- Runs after 0007_curated_dinner_library.sql.
+-- A reviewed, attributed CC BY-SA 4.0 starter catalogue. This migration is
 -- deliberately static: running it never fetches the web or changes household copies.
 
 do $$
@@ -111,4 +112,3 @@ begin
   end if;
 end;
 $$;
-
