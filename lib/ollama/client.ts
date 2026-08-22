@@ -2,7 +2,12 @@ import "server-only";
 
 import { getOllamaConfiguration } from "@/lib/ollama/config";
 
-const REQUEST_TIMEOUT_MS = 30_000;
+// Model loading and multi-recipe JSON generation can take noticeably longer
+// than a readiness check on consumer hardware. Keep each operation bounded,
+// but give generation enough time to complete instead of treating a healthy
+// local model as unavailable.
+const READINESS_TIMEOUT_MS = 10_000;
+const GENERATION_TIMEOUT_MS = 120_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 
 type OllamaTagsResponse = { models?: Array<{ name?: string }> };
@@ -57,12 +62,12 @@ async function boundedJson(response: Response): Promise<unknown> {
   }
 }
 
-async function ollamaFetch(url: string, init?: RequestInit): Promise<Response> {
+async function ollamaFetch(url: string, timeoutMs: number, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(url, {
       ...init,
       cache: "no-store",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") {
@@ -82,7 +87,7 @@ export async function getOllamaReadiness(): Promise<OllamaReadiness> {
   }
 
   try {
-    const response = await ollamaFetch(endpoint("/api/tags"));
+    const response = await ollamaFetch(endpoint("/api/tags"), READINESS_TIMEOUT_MS);
     if (!response.ok) return { status: "unavailable", message: "Ollama is unavailable. Start it locally and try again." };
     const payload = await boundedJson(response) as OllamaTagsResponse;
     if (!payload.models?.some((candidate) => candidate.name === model || candidate.name === `${model}:latest`)) {
@@ -97,10 +102,14 @@ export async function getOllamaReadiness(): Promise<OllamaReadiness> {
 /** Sends a fixed, non-proxy generation request to the local Ollama API. */
 export async function generateWithOllama(prompt: string): Promise<string> {
   const { model } = getOllamaConfiguration();
-  const response = await ollamaFetch(endpoint("/api/generate"), {
+  const response = await ollamaFetch(endpoint("/api/generate"), GENERATION_TIMEOUT_MS, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, prompt, stream: false, format: "json", options: { temperature: 0.3 } }),
+    // Qwen3 otherwise spends tokens on a private reasoning trace before it
+    // emits the schema-bound result. This is a local, server-only request;
+    // `think: false` keeps the response focused while the timeout remains an
+    // absolute upper bound for slower machines.
+    body: JSON.stringify({ model, prompt, stream: false, format: "json", think: false, options: { temperature: 0.3 } }),
   });
   if (!response.ok) throw new OllamaGenerationError("Ollama could not generate a plan. Check the local model and try again.");
   const payload = await boundedJson(response) as OllamaGenerateResponse;

@@ -18,6 +18,7 @@ describe("local Ollama client", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     if (originalBaseUrl === undefined) delete process.env.OLLAMA_BASE_URL; else process.env.OLLAMA_BASE_URL = originalBaseUrl;
     if (originalModel === undefined) delete process.env.OLLAMA_MODEL; else process.env.OLLAMA_MODEL = originalModel;
@@ -46,6 +47,31 @@ describe("local Ollama client", () => {
     const { generateWithOllama } = await import("@/lib/ollama/client");
 
     await expect(generateWithOllama("make a plan")).rejects.toThrow("Ollama is unavailable. Start it locally and try again.");
+  });
+
+  test("uses a bounded, non-thinking JSON generation request for Qwen", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ response: '{"recipes":[]}' }));
+    const { generateWithOllama } = await import("@/lib/ollama/client");
+
+    await expect(generateWithOllama("make a plan")).resolves.toBe('{"recipes":[]}');
+
+    expect(timeout).toHaveBeenCalledWith(120_000);
+    const request = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
+    expect(request).toEqual(expect.objectContaining({
+      method: "POST",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      signal: expect.any(AbortSignal),
+    }));
+    expect(JSON.parse(String(request.body))).toEqual({
+      model: "qwen3",
+      prompt: "make a plan",
+      stream: false,
+      format: "json",
+      think: false,
+      options: { temperature: 0.3 },
+    });
   });
 
   test("rejects malformed or oversized generation responses", async () => {
