@@ -34,6 +34,20 @@ describe("WeeklyPlanGenerator", () => {
     });
   });
 
+  test("allows generating a proposal with no weekly goals selected", async () => {
+    const user = userEvent.setup();
+    render(<WeeklyPlanGenerator recipes={[]} weekStart="2026-06-15" />);
+
+    await user.click(screen.getByRole("button", { name: "Generate dinner proposal" }));
+
+    await screen.findByText("Review your proposal before anything is saved.");
+    expect(mocks.generateWeeklyPlanProposal).toHaveBeenCalledWith(expect.objectContaining({
+      goals: [],
+      dietaryExclusions: [],
+      likesDislikes: null,
+    }));
+  });
+
   test("keeps all proposal changes local until explicit confirmation", async () => {
     const user = userEvent.setup();
     render(<WeeklyPlanGenerator recipes={[

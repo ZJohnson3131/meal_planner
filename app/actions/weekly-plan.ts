@@ -49,14 +49,14 @@ function buildPrompt(input: {
 }): string {
   return [
     "Return JSON only, with exactly this shape: {\"drafts\":[{\"title\":string,\"servings\":number,\"estimatedMinutes\":number|null,\"rationale\":string,\"ingredients\":[{\"itemName\":string,\"quantity\":number|null,\"unit\":string|null,\"notes\":string|null}],\"instructions\":string}]}",
-    `Create exactly ${input.missingSlots} distinct dinner recipe drafts for ${input.householdSize} people.`,
-    `Goals: ${input.goals.join(", ")}.`,
+    `Create exactly ${input.missingSlots} distinct dinner recipe draft for ${input.householdSize} people.`,
+    input.goals.length ? `Goals: ${input.goals.join(", ")}.` : "No weekly goals were provided.",
     input.maxCookingMinutes ? `Maximum cooking time: ${input.maxCookingMinutes} minutes.` : "No cooking-time limit was provided.",
     input.dietaryExclusions.length ? `Avoid these explicit exclusions: ${input.dietaryExclusions.join(", ")}.` : "No dietary exclusions were provided.",
     input.likesDislikes ? `Likes/dislikes: ${input.likesDislikes}.` : "No likes or dislikes were provided.",
     input.selectedRecipes.length ? `Do not duplicate these selected meals: ${input.selectedRecipes.join("; ")}.` : "No saved meals are selected.",
     input.pantryNames.length ? `Available pantry item names (quantities are unknown): ${input.pantryNames.join(", ")}.` : "No pantry items were provided.",
-    `Units must be one of: ${supportedUnitPromptVocabulary}; use null for an unknown or inapplicable unit. Do not claim allergen safety, nutrition, price, or pantry quantities.`,
+    `Keep the draft compact: use 3 to 6 ingredients and no more than 2 short instruction sentences. Units must be one of: ${supportedUnitPromptVocabulary}; use null for an unknown or inapplicable unit. Do not claim allergen safety, nutrition, price, or pantry quantities.`,
   ].join("\n");
 }
 
@@ -118,21 +118,33 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
   const readiness = await getOllamaReadiness();
   if (readiness.status !== "ready") return { items, emptySlots: missingSlots, ollama: readiness };
 
-  const prompt = buildPrompt({
-    householdSize: parsed.data.householdSize, missingSlots, goals: parsed.data.goals,
-    maxCookingMinutes: parsed.data.maxCookingMinutes, dietaryExclusions: parsed.data.dietaryExclusions,
-    likesDislikes: parsed.data.likesDislikes, selectedRecipes: selected.map((recipe) => recipe.title).slice(0, 20),
-    pantryNames: (pantryResult.data ?? []).map((item) => item.item_name).slice(0, 50),
-  });
   try {
-    let drafts: GeneratedRecipeDraft[] | null = null;
-    for (let attempt = 0; attempt < 2 && !drafts; attempt += 1) {
-      const raw = await generateWithOllama(attempt === 0 ? prompt : `${prompt}\nYour previous response was invalid. Return only valid JSON matching the exact schema.`);
-      const decoded = (() => { try { return JSON.parse(raw); } catch { return null; } })();
-      const validated = generatedDraftListSchema.safeParse(decoded);
-      if (validated.success && validated.data.drafts.length === missingSlots) drafts = validated.data.drafts;
+    const drafts: GeneratedRecipeDraft[] = [];
+    const selectedRecipeTitles = selected.map((recipe) => recipe.title).slice(0, 20);
+    const pantryNames = (pantryResult.data ?? []).map((item) => item.item_name).slice(0, 50);
+
+    // Qwen3's local default context is 4K tokens. Asking it for seven full
+    // recipe objects can exceed that budget (and leave a CPU-only runtime
+    // busy after a timed-out request), so generate and validate one compact
+    // draft at a time.
+    for (let slot = 0; slot < missingSlots; slot += 1) {
+      const prompt = buildPrompt({
+        householdSize: parsed.data.householdSize, missingSlots: 1, goals: parsed.data.goals,
+        maxCookingMinutes: parsed.data.maxCookingMinutes, dietaryExclusions: parsed.data.dietaryExclusions,
+        likesDislikes: parsed.data.likesDislikes,
+        selectedRecipes: [...selectedRecipeTitles, ...drafts.map((draft) => draft.title)].slice(0, 20),
+        pantryNames,
+      });
+      let draft: GeneratedRecipeDraft | null = null;
+      for (let attempt = 0; attempt < 2 && !draft; attempt += 1) {
+        const raw = await generateWithOllama(attempt === 0 ? prompt : `${prompt}\nYour previous response was invalid. Return only valid JSON matching the exact schema.`);
+        const decoded = (() => { try { return JSON.parse(raw); } catch { return null; } })();
+        const validated = generatedDraftListSchema.safeParse(decoded);
+        if (validated.success && validated.data.drafts.length === 1) draft = validated.data.drafts[0];
+      }
+      if (!draft) return { items, emptySlots: missingSlots, ollama: { status: "failed", message: "Ollama returned an invalid recipe draft. You can add recipes manually or try again." } };
+      drafts.push(draft);
     }
-    if (!drafts) return { items, emptySlots: missingSlots, ollama: { status: "failed", message: "Ollama returned invalid recipe drafts. You can add recipes manually or try again." } };
     return {
       items: [...items, ...drafts.map((draft, index) => ({ plannedFor: dates[selected.length + index], source: "generated" as const, draft, reviewRequired: true }))],
       emptySlots: 0,

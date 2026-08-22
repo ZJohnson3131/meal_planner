@@ -9,6 +9,11 @@ import { getOllamaConfiguration } from "@/lib/ollama/config";
 const READINESS_TIMEOUT_MS = 10_000;
 const GENERATION_TIMEOUT_MS = 120_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
+// A single compact recipe fits comfortably within Qwen3's default 4K context
+// on a CPU-only local runtime. The planner requests one recipe at a time, so
+// keep the output budget deliberately small instead of allowing one large
+// multi-recipe response to monopolise the local model.
+const RECIPE_OUTPUT_TOKEN_LIMIT = 384;
 
 type OllamaTagsResponse = { models?: Array<{ name?: string }> };
 type OllamaGenerateResponse = { response?: string };
@@ -109,7 +114,14 @@ export async function generateWithOllama(prompt: string): Promise<string> {
     // emits the schema-bound result. This is a local, server-only request;
     // `think: false` keeps the response focused while the timeout remains an
     // absolute upper bound for slower machines.
-    body: JSON.stringify({ model, prompt, stream: false, format: "json", think: false, options: { temperature: 0.3 } }),
+    body: JSON.stringify({
+      model,
+      prompt,
+      stream: false,
+      format: "json",
+      think: false,
+      options: { temperature: 0.3, num_predict: RECIPE_OUTPUT_TOKEN_LIMIT },
+    }),
   });
   if (!response.ok) throw new OllamaGenerationError("Ollama could not generate a plan. Check the local model and try again.");
   const payload = await boundedJson(response) as OllamaGenerateResponse;

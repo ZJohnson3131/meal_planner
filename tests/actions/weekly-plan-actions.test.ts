@@ -40,6 +40,12 @@ function savedRecipeQuery() {
   };
 }
 
+function emptySavedRecipeQuery() {
+  return {
+    select: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }) }) }),
+  };
+}
+
 function pantryQuery() {
   return {
     select: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ order: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) }) }) }),
@@ -73,6 +79,30 @@ describe("weekly-plan actions", () => {
     expect(mocks.generateWithOllama.mock.calls[0][0]).toContain("No cooking-time limit was provided.");
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  test("generates missing dinners as bounded one-draft requests and excludes prior drafts", async () => {
+    mocks.createClient.mockResolvedValue({
+      from: vi.fn((table: string) => table === "recipes" ? emptySavedRecipeQuery() : pantryQuery()),
+      rpc: mocks.rpc,
+    });
+    mocks.generateWithOllama.mockResolvedValue(JSON.stringify({ drafts: [generated] }));
+    const { generateWeeklyPlanProposal } = await import("@/app/actions/weekly-plan");
+
+    const proposal = await generateWeeklyPlanProposal(preferences());
+
+    expect(proposal.items).toHaveLength(2);
+    expect(mocks.generateWithOllama).toHaveBeenCalledTimes(2);
+    expect(mocks.generateWithOllama.mock.calls[0][0]).toContain("Create exactly 1 distinct dinner recipe draft");
+    expect(mocks.generateWithOllama.mock.calls[1][0]).toContain("Do not duplicate these selected meals: Tomato pasta.");
+  });
+
+  test("uses an explicit no-goals prompt when meal preferences are omitted", async () => {
+    const { generateWeeklyPlanProposal } = await import("@/app/actions/weekly-plan");
+
+    await generateWeeklyPlanProposal({ ...preferences(), goals: [] });
+
+    expect(mocks.generateWithOllama.mock.calls[0][0]).toContain("No weekly goals were provided.");
   });
 
   test("persists only confirmed reviewed items through the household-scoped atomic RPC", async () => {

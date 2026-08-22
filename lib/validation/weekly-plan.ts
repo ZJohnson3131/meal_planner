@@ -23,7 +23,9 @@ export const weeklyPlanPreferencesSchema = z.object({
   weekStart: dateSchema.refine((value) => new Date(`${value}T00:00:00Z`).getUTCDay() === 1, "Week must start on Monday"),
   householdSize: z.coerce.number().int().min(1).max(RECIPE_IMPORT_LIMITS.servingsMaximum),
   dinnerCount: z.coerce.number().int().min(1).max(7),
-  goals: z.array(z.enum(WEEKLY_PLAN_GOALS)).min(1).max(WEEKLY_PLAN_GOALS.length),
+  // Meal preferences guide selection when supplied, but are never required to
+  // generate a week. The client sends an empty array for “no preference”.
+  goals: z.array(z.enum(WEEKLY_PLAN_GOALS)).max(WEEKLY_PLAN_GOALS.length),
   maxCookingMinutes: z.coerce.number().int().positive().max(1_440).nullable().optional(),
   dietaryExclusions: z.array(shortText.min(1)).max(20).default([]),
   likesDislikes: optionalText,

@@ -70,7 +70,7 @@ describe("local Ollama client", () => {
       stream: false,
       format: "json",
       think: false,
-      options: { temperature: 0.3 },
+      options: { temperature: 0.3, num_predict: 384 },
     });
   });
 

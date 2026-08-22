@@ -62,11 +62,12 @@ export function WeeklyPlanGeneratorClient({
   const acceptedCount = useMemo(() => items.filter((item) => item.accepted).length, [items]);
 
   function generate(formData: FormData) {
+    const selectedGoals = formData.getAll("goals").map(String) as WeeklyPlanGoal[];
     const preferences: WeeklyPlanPreferences = {
       weekStart,
       householdSize: Number(formData.get("householdSize")),
       dinnerCount: Number(formData.get("dinnerCount")),
-      goals: formData.getAll("goals").map(String) as WeeklyPlanGoal[],
+      goals: selectedGoals,
       maxCookingMinutes: formData.get("maxCookingMinutes") ? Number(formData.get("maxCookingMinutes")) : null,
       dietaryExclusions: String(formData.get("dietaryExclusions") ?? "").split(",").map((item) => item.trim()).filter(Boolean),
       likesDislikes: String(formData.get("likesDislikes") ?? "").trim() || null,
@@ -144,14 +145,15 @@ export function WeeklyPlanGeneratorClient({
               <div className="mt-1 flex rounded-md shadow-sm"><input className="block w-full rounded-l-md border border-slate-300 bg-white px-3 py-2" id="weekly-plan-cooking-time" min="1" name="maxCookingMinutes" type="number" /><span className="inline-flex items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-100 px-3 text-sm text-slate-600">min</span></div>
             </label>
           </div>
-          <fieldset>
-            <legend className="text-sm font-medium text-slate-800">Weekly goals</legend>
+          <fieldset aria-describedby="weekly-plan-goals-help">
+            <legend className="text-sm font-medium text-slate-800">Weekly goals <span className="font-normal text-slate-600">(optional)</span></legend>
+            <p className="mt-1 text-sm text-slate-600" id="weekly-plan-goals-help">Leave these unselected if you have no particular meal preferences.</p>
             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
               {GOALS.map(([value, label]) => <label className="flex items-center gap-2 text-sm text-slate-700" key={value}><input className="size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" name="goals" type="checkbox" value={value} />{label}</label>)}
             </div>
           </fieldset>
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-exclusions">Dietary exclusions <span className="font-normal text-slate-600">(comma-separated)</span>
+            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-exclusions">Dietary exclusions <span className="font-normal text-slate-600">(optional, comma-separated)</span>
               <input className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2" id="weekly-plan-exclusions" name="dietaryExclusions" placeholder="e.g. peanuts, shellfish" />
             </label>
             <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-likes">Likes and dislikes <span className="font-normal text-slate-600">(optional)</span>
