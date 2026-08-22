@@ -90,6 +90,31 @@ describe("database hardening migration contract", () => {
       expect(sql).toMatch(new RegExp(`grant execute on function public\\.${rpc}\\(`, "i"));
     }
   });
+
+  test("keeps the globally curated catalogue read-only and adoption-authorized", async () => {
+    const sql = await source("supabase/migrations/0006_curated_dinner_library.sql");
+
+    for (const table of [
+      "curated_recipe_collections",
+      "curated_recipes",
+      "curated_recipe_ingredients",
+      "curated_tags",
+      "curated_recipe_tags",
+      "curated_recipe_adoptions",
+    ]) {
+      expect(sql).toMatch(new RegExp(`alter table public\\.${table} enable row level security`, "i"));
+    }
+    expect(sql).toMatch(/curated_collections_published_select/i);
+    expect(sql).toMatch(/curated_recipes_published_select/i);
+    expect(sql).toMatch(/curated_recipe_ingredients_published_select/i);
+    expect(sql).toMatch(/curated_recipe_adoptions_member_select/i);
+    expect(sql).toMatch(/security definer/i);
+    expect(sql).toMatch(/not public\.is_household_member\(p_household_id\)/i);
+    expect(sql).toMatch(/and r\.published\s+and c\.published/i);
+    expect(sql).toMatch(/revoke all on function public\.adopt_curated_recipe\(uuid, uuid\) from public, anon/i);
+    expect(sql).toMatch(/grant execute on function public\.adopt_curated_recipe\(uuid, uuid\) to authenticated/i);
+    expect(sql).toMatch(/pg_advisory_xact_lock/i);
+  });
 });
 
 describe("deployment and HTTP hardening contracts", () => {

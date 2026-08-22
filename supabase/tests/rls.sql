@@ -11,6 +11,12 @@ select is(
       and rowsecurity is true
   ),
   array[
+    'curated_recipe_adoptions',
+    'curated_recipe_collections',
+    'curated_recipe_ingredients',
+    'curated_recipe_tags',
+    'curated_recipes',
+    'curated_tags',
     'household_memberships',
     'households',
     'meal_plan_entries',
@@ -23,7 +29,7 @@ select is(
     'shopping_list_items',
     'shopping_lists'
   ]::text[],
-  'RLS is enabled on exactly the eleven shipped household data tables'
+  'RLS is enabled on exactly the seventeen shipped data tables'
 );
 
 select is(
@@ -52,7 +58,13 @@ select ok(
       'public.pantry_items',
       'public.pantry_deductions',
       'public.shopping_lists',
-      'public.shopping_list_items'
+      'public.shopping_list_items',
+      'public.curated_recipe_collections',
+      'public.curated_recipes',
+      'public.curated_recipe_ingredients',
+      'public.curated_tags',
+      'public.curated_recipe_tags',
+      'public.curated_recipe_adoptions'
     ]) as shipped_table(name)
     where has_table_privilege('anon', name, 'SELECT')
       or has_table_privilege('anon', name, 'INSERT')
