@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { WeeklyDinnerPlanner } from "@/components/meal-planner/weekly-dinner-planner";
+import { WeeklyPlanGenerator } from "@/components/meal-planner/weekly-plan-generator";
 import { requireHousehold } from "@/lib/auth/household";
 import { calendarWeekRange, isIsoCalendarDate } from "@/lib/domain/calendar";
 import { createClient } from "@/lib/supabase/server";
@@ -90,6 +91,7 @@ export default async function PlannerPage({
         </p>
       </div>
 
+      <WeeklyPlanGenerator recipes={recipesResult.data ?? []} weekStart={weekStart} />
       <WeeklyDinnerPlanner entries={entries} recipes={recipesResult.data ?? []} weekStart={weekStart} />
     </div>
   );

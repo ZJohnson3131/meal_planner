@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth/household", () => ({ requireHousehold: mocks.requireHousehold }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
+vi.mock("server-only", () => ({}));
 vi.mock("@/components/meal-planner/weekly-dinner-planner", () => ({
   WeeklyDinnerPlanner: mocks.weeklyDinnerPlanner,
 }));

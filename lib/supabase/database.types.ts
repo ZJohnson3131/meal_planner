@@ -494,6 +494,14 @@ export type Database = {
         Args: { p_entry_id: string }
         Returns: undefined
       }
+      confirm_weekly_dinner_plan: {
+        Args: {
+          p_assignments: Json
+          p_household_id: string
+          p_week_start: string
+        }
+        Returns: string[]
+      }
       cooking_unit_base_factor: { Args: { p_unit: string }; Returns: number }
       cooking_units_are_compatible: {
         Args: { p_from: string; p_to: string }

@@ -53,6 +53,14 @@ The commands below use the Windows-safe `npm.cmd` and `npx.cmd` executables. In 
 
 7. Open [http://localhost:3000](http://localhost:3000).
 
+## Optional local Ollama planning
+
+The **Plan my week** feature uses Ollama only on your computer. Install Ollama,
+start its local runtime, choose a model, then set `OLLAMA_MODEL` in `.env.local`
+to that model name (for example after `ollama pull llama3.2`). Leave
+`OLLAMA_BASE_URL` at `http://127.0.0.1:11434`; remote endpoints are deliberately
+rejected. No recipe or household data is sent to a third-party AI provider.
+
 Local services are available at:
 
 - App: http://localhost:3000
