@@ -24,6 +24,8 @@ let recipeId: string;
 let ingredientId: string;
 let pantryItemId: string;
 let entryId: string;
+let curatedRecipeId: string;
+let unpublishedCuratedRecipeId: string;
 const createdUserIds: string[] = [];
 let clientSequence = 0;
 
@@ -240,6 +242,42 @@ beforeAll(async () => {
   });
   if (entry.error || !entry.data) throw entry.error ?? new Error("Meal fixture missing");
   entryId = entry.data as string;
+
+  const { data: curatedRecipes, error: curatedRecipeError } = await admin
+    .from("curated_recipes").select("id").eq("published", true).limit(1);
+  if (curatedRecipeError || curatedRecipes?.length !== 1) {
+    throw curatedRecipeError ?? new Error("Published curated recipe fixture missing");
+  }
+  curatedRecipeId = curatedRecipes[0].id;
+
+  const fixtureSlug = `security-unpublished-${crypto.randomUUID()}`;
+  const { data: collection, error: collectionError } = await admin
+    .from("curated_recipe_collections")
+    .insert({
+      slug: fixtureSlug,
+      name: "Security unpublished collection",
+      description: null,
+      source_name: "Security suite",
+      source_url: "https://example.test/security-suite",
+      license_name: "Test license",
+      license_url: "https://example.test/license",
+      published: false,
+    }).select("id").single();
+  if (collectionError || !collection) throw collectionError ?? new Error("Curated collection fixture missing");
+  const { data: unpublished, error: unpublishedError } = await admin
+    .from("curated_recipes")
+    .insert({
+      collection_id: collection.id,
+      slug: "unpublished-dinner",
+      title: "Unpublished security dinner",
+      description: null,
+      source_url: "https://example.test/unpublished-dinner",
+      servings: 2,
+      instructions: "Do not expose.",
+      published: false,
+    }).select("id").single();
+  if (unpublishedError || !unpublished) throw unpublishedError ?? new Error("Unpublished curated fixture missing");
+  unpublishedCuratedRecipeId = unpublished.id;
 }, 30_000);
 
 afterAll(async () => {
@@ -266,6 +304,58 @@ describe.sequential("explicit local Supabase security and integrity suite", () =
     const { data, error } = await outsider.from("recipes").select("id").eq("id", recipeId);
     expect(error).toBeNull();
     expect(data).toEqual([]);
+  });
+
+  test("exposes only published catalogue data and prevents anonymous catalogue access", async () => {
+    const { data: published, error: publishedError } = await owner
+      .from("curated_recipes").select("id").eq("id", curatedRecipeId);
+    expect(publishedError).toBeNull();
+    expect(published).toHaveLength(1);
+
+    const { data: unpublished, error: unpublishedError } = await owner
+      .from("curated_recipes").select("id").eq("id", unpublishedCuratedRecipeId);
+    expect(unpublishedError).toBeNull();
+    expect(unpublished).toEqual([]);
+
+    const anonymous = createClient(apiUrl, anonKey, { auth: { persistSession: false } });
+    expect((await anonymous.from("curated_recipes").select("id")).error).not.toBeNull();
+    expect((await anonymous.rpc("adopt_curated_recipe", {
+      p_household_id: ownerHouseholdId,
+      p_curated_recipe_id: curatedRecipeId,
+    })).error).not.toBeNull();
+  });
+
+  test("adopts a published dinner once, hides household adoptions from outsiders, and rejects forged or unpublished targets", async () => {
+    const first = await owner.rpc("adopt_curated_recipe", {
+      p_household_id: ownerHouseholdId,
+      p_curated_recipe_id: curatedRecipeId,
+    });
+    expect(first.error).toBeNull();
+    expect(first.data).toMatch(/[0-9a-f-]{36}/i);
+
+    const second = await owner.rpc("adopt_curated_recipe", {
+      p_household_id: ownerHouseholdId,
+      p_curated_recipe_id: curatedRecipeId,
+    });
+    expect(second.error).toBeNull();
+    expect(second.data).toBe(first.data);
+    const { count } = await owner.from("curated_recipe_adoptions")
+      .select("recipe_id", { count: "exact", head: true })
+      .eq("household_id", ownerHouseholdId).eq("curated_recipe_id", curatedRecipeId);
+    expect(count).toBe(1);
+
+    const outsiderRead = await outsider.from("curated_recipe_adoptions")
+      .select("recipe_id").eq("household_id", ownerHouseholdId).eq("curated_recipe_id", curatedRecipeId);
+    expect(outsiderRead.error).toBeNull();
+    expect(outsiderRead.data).toEqual([]);
+    expect((await outsider.rpc("adopt_curated_recipe", {
+      p_household_id: ownerHouseholdId,
+      p_curated_recipe_id: curatedRecipeId,
+    })).error).not.toBeNull();
+    expect((await owner.rpc("adopt_curated_recipe", {
+      p_household_id: ownerHouseholdId,
+      p_curated_recipe_id: unpublishedCuratedRecipeId,
+    })).error).not.toBeNull();
   });
 
   test("accepts valid transitions but denies forged and legacy completion RPCs", async () => {

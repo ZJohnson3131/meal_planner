@@ -9,6 +9,236 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      curated_recipe_adoptions: {
+        Row: {
+          adopted_at: string
+          curated_recipe_id: string
+          household_id: string
+          recipe_id: string
+        }
+        Insert: {
+          adopted_at?: string
+          curated_recipe_id: string
+          household_id: string
+          recipe_id: string
+        }
+        Update: {
+          adopted_at?: string
+          curated_recipe_id?: string
+          household_id?: string
+          recipe_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "curated_recipe_adoptions_curated_recipe_id_fkey"
+            columns: ["curated_recipe_id"]
+            isOneToOne: false
+            referencedRelation: "curated_recipes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "curated_recipe_adoptions_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "curated_recipe_adoptions_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: true
+            referencedRelation: "recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      curated_recipe_collections: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          license_name: string
+          license_url: string
+          name: string
+          published: boolean
+          slug: string
+          source_name: string
+          source_url: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          license_name: string
+          license_url: string
+          name: string
+          published?: boolean
+          slug: string
+          source_name: string
+          source_url: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          license_name?: string
+          license_url?: string
+          name?: string
+          published?: boolean
+          slug?: string
+          source_name?: string
+          source_url?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      curated_recipe_ingredients: {
+        Row: {
+          created_at: string
+          curated_recipe_id: string
+          display_order: number
+          id: string
+          item_name: string
+          notes: string | null
+          quantity: number | null
+          unit: string | null
+        }
+        Insert: {
+          created_at?: string
+          curated_recipe_id: string
+          display_order?: number
+          id?: string
+          item_name: string
+          notes?: string | null
+          quantity?: number | null
+          unit?: string | null
+        }
+        Update: {
+          created_at?: string
+          curated_recipe_id?: string
+          display_order?: number
+          id?: string
+          item_name?: string
+          notes?: string | null
+          quantity?: number | null
+          unit?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "curated_recipe_ingredients_curated_recipe_id_fkey"
+            columns: ["curated_recipe_id"]
+            isOneToOne: false
+            referencedRelation: "curated_recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      curated_recipe_tags: {
+        Row: {
+          curated_recipe_id: string
+          curated_tag_id: string
+        }
+        Insert: {
+          curated_recipe_id: string
+          curated_tag_id: string
+        }
+        Update: {
+          curated_recipe_id?: string
+          curated_tag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "curated_recipe_tags_curated_recipe_id_fkey"
+            columns: ["curated_recipe_id"]
+            isOneToOne: false
+            referencedRelation: "curated_recipes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "curated_recipe_tags_curated_tag_id_fkey"
+            columns: ["curated_tag_id"]
+            isOneToOne: false
+            referencedRelation: "curated_tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      curated_recipes: {
+        Row: {
+          collection_id: string
+          created_at: string
+          description: string | null
+          id: string
+          instructions: string
+          published: boolean
+          servings: number | null
+          slug: string
+          source_url: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          collection_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          instructions: string
+          published?: boolean
+          servings?: number | null
+          slug: string
+          source_url: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          collection_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          instructions?: string
+          published?: boolean
+          servings?: number | null
+          slug?: string
+          source_url?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "curated_recipes_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "curated_recipe_collections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      curated_tags: {
+        Row: {
+          category: Database["public"]["Enums"]["curated_tag_category"]
+          created_at: string
+          id: string
+          label: string
+          slug: string
+        }
+        Insert: {
+          category: Database["public"]["Enums"]["curated_tag_category"]
+          created_at?: string
+          id?: string
+          label: string
+          slug: string
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["curated_tag_category"]
+          created_at?: string
+          id?: string
+          label?: string
+          slug?: string
+        }
+        Relationships: []
+      }
       household_memberships: {
         Row: {
           created_at: string
@@ -481,6 +711,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      adopt_curated_recipe: {
+        Args: { p_curated_recipe_id: string; p_household_id: string }
+        Returns: string
+      }
       assign_dinner: {
         Args: {
           p_household_id: string
@@ -593,6 +827,12 @@ export type Database = {
       }
     }
     Enums: {
+      curated_tag_category:
+        | "course"
+        | "cuisine"
+        | "protein"
+        | "method"
+        | "dietary"
       deduction_status: "applied" | "reversed" | "review_required"
       household_role: "owner" | "member"
       ingestion_status: "manual" | "parsed" | "needs_review" | "failed"
@@ -726,6 +966,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      curated_tag_category: [
+        "course",
+        "cuisine",
+        "protein",
+        "method",
+        "dietary",
+      ],
       deduction_status: ["applied", "reversed", "review_required"],
       household_role: ["owner", "member"],
       ingestion_status: ["manual", "parsed", "needs_review", "failed"],
