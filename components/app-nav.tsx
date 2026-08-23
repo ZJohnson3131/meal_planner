@@ -11,14 +11,14 @@ const links = [
 
 export function AppNav() {
   return (
-    <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-3">
-      <Link className="font-semibold text-slate-950" href="/dashboard">
+    <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-soft-border bg-cream px-6 py-3">
+      <Link className="font-semibold text-espresso" href="/dashboard">
         Meal Planner
       </Link>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {links.map((link) => (
           <Link
-            className="text-sm text-slate-700 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+            className="text-sm text-espresso/75 hover:text-terracotta focus:outline-none focus:ring-2 focus:ring-terracotta focus:ring-offset-2"
             href={link.href}
             key={link.href}
           >
@@ -27,7 +27,7 @@ export function AppNav() {
         ))}
         <form action={signOut}>
           <button
-            className="text-sm text-slate-700 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:ring-offset-2"
+            className="text-sm text-espresso/75 hover:text-terracotta focus:outline-none focus:ring-2 focus:ring-terracotta focus:ring-offset-2"
             type="submit"
           >
             Sign out

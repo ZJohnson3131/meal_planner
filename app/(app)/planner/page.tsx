@@ -21,17 +21,17 @@ export default async function PlannerPage({
     return (
       <div className="space-y-8">
         <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-normal text-slate-950">Dinner planner</h1>
-          <p className="max-w-2xl text-sm leading-6 text-slate-600">
+          <h1 className="text-3xl font-semibold tracking-normal text-espresso">Dinner planner</h1>
+          <p className="max-w-2xl text-sm leading-6 text-espresso/70">
             Choose a local calendar date to open its Monday-to-Sunday dinner plan.
           </p>
         </div>
-        <form className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-5" method="get">
-          <label className="text-sm font-medium text-slate-800">
+        <form className="flex flex-wrap items-end gap-3 rounded-2xl border border-soft-border bg-cream p-5" method="get">
+          <label className="text-sm font-medium text-espresso">
             Date in the week
-            <input className="mt-1 block rounded-md border border-slate-300 px-3 py-2" name="weekStart" required type="date" />
+            <input className="mt-1 block rounded-xl border border-soft-border bg-parchment px-3 py-2 text-espresso" name="weekStart" required type="date" />
           </label>
-          <button className="rounded-md bg-emerald-700 px-4 py-2 font-medium text-white" type="submit">
+          <button className="rounded-xl bg-terracotta px-4 py-2 font-medium text-white" type="submit">
             View week
           </button>
         </form>
@@ -92,8 +92,8 @@ export default async function PlannerPage({
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-normal text-slate-950">Dinner planner</h1>
-        <p className="max-w-2xl text-sm leading-6 text-slate-600">
+        <h1 className="text-3xl font-semibold tracking-normal text-espresso">Dinner planner</h1>
+        <p className="max-w-2xl text-sm leading-6 text-espresso/70">
           Assign a recipe to each dinner this week. Skipped dinners remain visible so your plan stays accurate.
         </p>
       </div>
