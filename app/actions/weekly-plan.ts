@@ -10,6 +10,7 @@ import type {
   WeeklyPlanEmptySlot,
   WeeklyPlanProposal,
   WeeklyPlanProposalItem,
+  WeeklyPlanExistingEntry,
 } from "@/lib/domain/weekly-plan-types";
 import {
   confirmWeeklyPlanSchema,
@@ -34,14 +35,10 @@ type SavedRecipeRecord = RankableSavedRecipe & {
   ingredients: Array<{ itemName: string; quantity: number | null; unit: SupportedCookingUnit | null; notes: string | null }>;
 };
 
-function weekDates(weekStart: string, count: number): string[] {
-  const start = Date.parse(`${weekStart}T00:00:00Z`);
-  return Array.from({ length: count }, (_, index) => new Date(start + index * 86_400_000).toISOString().slice(0, 10));
-}
-
-function emptySlotItems(dates: string[], offset: number, count: number, reason: string): WeeklyPlanEmptySlot[] {
+function emptySlotItems(dates: string[], offset: number, count: number, reason: string, currentByDate: Map<string, WeeklyPlanExistingEntry>): WeeklyPlanEmptySlot[] {
   return dates.slice(offset, offset + count).map((plannedFor) => ({
     plannedFor,
+    current: currentByDate.get(plannedFor) ?? null,
     source: "empty" as const,
     draft: {
       title: "",
@@ -56,8 +53,39 @@ function emptySlotItems(dates: string[], offset: number, count: number, reason: 
   }));
 }
 
+async function loadCurrentEntries(householdId: string, weekStart: string): Promise<WeeklyPlanExistingEntry[]> {
+  const supabase = await createClient();
+  const slotResult = await supabase
+    .from("meal_slots")
+    .select("id")
+    .eq("household_id", householdId)
+    .eq("name", "Dinner")
+    .eq("is_default", true)
+    .maybeSingle();
+  if (slotResult.error || !slotResult.data) throw new Error("We could not load the Dinner schedule for planning.");
+  const weekEnd = new Date(Date.parse(`${weekStart}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+  const entriesResult = await supabase
+    .from("meal_plan_entries")
+    .select("planned_for, recipe_id, status, recipe:recipes(title)")
+    .eq("household_id", householdId)
+    .eq("meal_slot_id", slotResult.data.id)
+    .gte("planned_for", weekStart)
+    .lte("planned_for", weekEnd);
+  if (entriesResult.error) throw new Error("We could not load current dinners for planning.");
+  return (entriesResult.data ?? []).map((entry) => {
+    const recipe = Array.isArray(entry.recipe) ? entry.recipe[0] : entry.recipe;
+    return {
+      plannedFor: entry.planned_for,
+      recipeId: entry.recipe_id,
+      recipeTitle: recipe?.title ?? "Untitled dinner",
+      status: entry.status,
+    };
+  });
+}
+
 function buildPrompt(input: {
   householdSize: number;
+  cookingEffort: "quick" | "balanced" | "project";
   missingSlots: number;
   goals: string[];
   maxCookingMinutes: number | null | undefined;
@@ -69,6 +97,7 @@ function buildPrompt(input: {
   return [
     "Return JSON only, with exactly this shape: {\"drafts\":[{\"title\":string,\"servings\":number,\"estimatedMinutes\":number|null,\"rationale\":string,\"ingredients\":[{\"itemName\":string,\"quantity\":number|null,\"unit\":string|null,\"notes\":string|null}],\"instructions\":string}]}",
     `Create exactly ${input.missingSlots} distinct dinner recipe draft for ${input.householdSize} people.`,
+    `Cooking effort: ${input.cookingEffort}.`,
     input.goals.length ? `Goals: ${input.goals.join(", ")}.` : "No weekly goals were provided.",
     input.maxCookingMinutes ? `Maximum cooking time: ${input.maxCookingMinutes} minutes.` : "No cooking-time limit was provided.",
     input.dietaryExclusions.length ? `Avoid these explicit exclusions: ${input.dietaryExclusions.join(", ")}.` : "No dietary exclusions were provided.",
@@ -113,31 +142,41 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
   if (!parsed.success) throw new Error("Weekly planning preferences are invalid.");
 
   const { householdId } = await requireHousehold();
-  const [savedRecipes, pantryResult] = await Promise.all([
+  const [savedRecipes, pantryResult, currentEntries] = await Promise.all([
     loadSavedRecipes(householdId),
     (async () => {
       const supabase = await createClient();
       return supabase.from("pantry_items").select("item_name").eq("household_id", householdId).order("item_name", { ascending: true }).limit(100);
     })(),
+    loadCurrentEntries(householdId, parsed.data.weekStart),
   ]);
   if (pantryResult.error) throw new Error("We could not load pantry details for planning.");
 
-  const ranked = rankSavedRecipes(savedRecipes, parsed.data);
-  const selected = ranked.slice(0, parsed.data.dinnerCount);
-  const dates = weekDates(parsed.data.weekStart, parsed.data.dinnerCount);
+  const currentByDate = new Map(currentEntries.map((entry) => [entry.plannedFor, entry]));
+  const selectedCurrentEntries = parsed.data.selectedDates
+    .map((date) => currentByDate.get(date))
+    .filter((entry): entry is WeeklyPlanExistingEntry => Boolean(entry));
+  if (selectedCurrentEntries.some((entry) => entry.status === "completed")) {
+    throw new Error("One of the selected dinners was completed while this planner was open. Refresh the week and choose another night.");
+  }
+
+  const assignedRecipeIds = new Set(currentEntries.map((entry) => entry.recipeId));
+  const ranked = rankSavedRecipes(savedRecipes.filter((recipe) => !assignedRecipeIds.has(recipe.id)), parsed.data);
+  const selected = ranked.slice(0, parsed.data.selectedDates.length);
+  const dates = parsed.data.selectedDates;
   const items: WeeklyPlanProposalItem[] = selected.map((recipe, index) => ({
-    plannedFor: dates[index], source: "saved", recipeId: recipe.id,
+    plannedFor: dates[index], current: currentByDate.get(dates[index]) ?? null, source: "saved", recipeId: recipe.id,
     savedRecipe: { title: recipe.title, description: recipe.description, servings: recipe.servings, instructions: recipe.instructions, ingredients: recipe.ingredients },
     rationale: recipe.favorite && parsed.data.preferFavorites ? "Saved favourite recipe" : "Saved recipe selected for your week",
     reviewRequired: recipe.reviewRequired,
   }));
-  const missingSlots = parsed.data.dinnerCount - selected.length;
+  const missingSlots = parsed.data.selectedDates.length - selected.length;
   if (!missingSlots) return { items, emptySlots: 0, ollama: { status: "ready" } };
 
   const readiness = await getOllamaReadiness();
   if (readiness.status !== "ready") {
     return {
-      items: [...items, ...emptySlotItems(dates, selected.length, missingSlots, readiness.message)],
+      items: [...items, ...emptySlotItems(dates, selected.length, missingSlots, readiness.message, currentByDate)],
       emptySlots: missingSlots,
       ollama: readiness,
     };
@@ -149,6 +188,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
       ...items,
       ...drafts.map((draft, index) => ({
         plannedFor: dates[selected.length + index],
+        current: currentByDate.get(dates[selected.length + index]) ?? null,
         source: "generated" as const,
         draft,
         reviewRequired: true as const,
@@ -158,6 +198,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
         selected.length + drafts.length,
         missingSlots - drafts.length,
         message,
+        currentByDate,
       ),
     ],
     emptySlots: missingSlots - drafts.length,
@@ -165,7 +206,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
   });
 
   try {
-    const selectedRecipeTitles = selected.map((recipe) => recipe.title).slice(0, 20);
+    const selectedRecipeTitles = [...selected.map((recipe) => recipe.title), ...currentEntries.map((entry) => entry.recipeTitle)].slice(0, 20);
     const pantryNames = (pantryResult.data ?? []).map((item) => item.item_name).slice(0, 50);
 
     // Qwen3's local default context is 4K tokens. Asking it for seven full
@@ -174,7 +215,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
     // draft at a time.
     for (let slot = 0; slot < missingSlots; slot += 1) {
       const prompt = buildPrompt({
-        householdSize: parsed.data.householdSize, missingSlots: 1, goals: parsed.data.goals,
+        householdSize: parsed.data.householdSize, cookingEffort: parsed.data.cookingEffort, missingSlots: 1, goals: parsed.data.goals,
         maxCookingMinutes: parsed.data.maxCookingMinutes, dietaryExclusions: parsed.data.dietaryExclusions,
         likesDislikes: parsed.data.likesDislikes,
         selectedRecipes: [...selectedRecipeTitles, ...drafts.map((draft) => draft.title)].slice(0, 20),
@@ -191,7 +232,7 @@ export async function generateWeeklyPlanProposal(input: unknown): Promise<Weekly
       drafts.push(draft);
     }
     return {
-      items: [...items, ...drafts.map((draft, index) => ({ plannedFor: dates[selected.length + index], source: "generated" as const, draft, reviewRequired: true }))],
+      items: [...items, ...drafts.map((draft, index) => ({ plannedFor: dates[selected.length + index], current: currentByDate.get(dates[selected.length + index]) ?? null, source: "generated" as const, draft, reviewRequired: true }))],
       emptySlots: 0,
       ollama: { status: "ready" },
     };

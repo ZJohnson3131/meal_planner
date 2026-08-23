@@ -14,9 +14,17 @@ export type {
   WeeklyPlanProposalItem,
 } from "@/lib/validation/weekly-plan";
 
+export type WeeklyPlanExistingEntry = {
+  plannedFor: string;
+  recipeId: string;
+  recipeTitle: string;
+  status: "planned" | "completed" | "skipped";
+};
+
 export type WeeklyPlanEmptySlot = {
   plannedFor: string;
   source: "empty";
+  current: WeeklyPlanExistingEntry | null;
   draft: GeneratedRecipeDraft;
   reason: string;
   reviewRequired: true;

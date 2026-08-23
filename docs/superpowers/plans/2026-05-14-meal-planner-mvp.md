@@ -51,6 +51,7 @@ MVP task mode lasts until every task in this plan is complete. After that, the P
 - 2026-08-19: Task 16 live verification completed locally: RLS integration, atomic-RPC schema lint, full Vitest suite, and Desktop Chrome plus Mobile Safari production E2E flows pass; pending PR review.
 - 2026-08-19: Task 17 local-development and security documentation completed; production build and Docker image verification pass; pending final MVP PR review.
 - 2026-08-20: Post-MVP codebase hardening completed: correctness, concurrency, dependency, container, database, ingestion, session, and test-suite remediations verified and independently approved.
+- 2026-08-24: Post-MVP warm progressive weekly plan guide completed on branch `guided-weekly-meal-plan-builder`; modal flow, warm palette, accessibility coverage, full tests, build, and E2E verification pass.
 
 ## Approved Spec
 

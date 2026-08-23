@@ -22,7 +22,8 @@ const generatedIngredientSchema = z.object({
 export const weeklyPlanPreferencesSchema = z.object({
   weekStart: dateSchema.refine((value) => new Date(`${value}T00:00:00Z`).getUTCDay() === 1, "Week must start on Monday"),
   householdSize: z.coerce.number().int().min(1).max(RECIPE_IMPORT_LIMITS.servingsMaximum),
-  dinnerCount: z.coerce.number().int().min(1).max(7),
+  selectedDates: z.array(dateSchema).min(1).max(7),
+  cookingEffort: z.enum(["quick", "balanced", "project"]).default("balanced"),
   // Meal preferences guide selection when supplied, but are never required to
   // generate a week. The client sends an empty array for “no preference”.
   goals: z.array(z.enum(WEEKLY_PLAN_GOALS)).max(WEEKLY_PLAN_GOALS.length),
@@ -30,6 +31,15 @@ export const weeklyPlanPreferencesSchema = z.object({
   dietaryExclusions: z.array(shortText.min(1)).max(20).default([]),
   likesDislikes: optionalText,
   preferFavorites: z.boolean().default(false),
+}).superRefine((value, context) => {
+  const expectedDates = new Set(Array.from({ length: 7 }, (_, index) => new Date(Date.parse(`${value.weekStart}T00:00:00Z`) + index * 86_400_000).toISOString().slice(0, 10)));
+  const seen = new Set<string>();
+  for (const selectedDate of value.selectedDates) {
+    if (!expectedDates.has(selectedDate) || seen.has(selectedDate)) {
+      context.addIssue({ code: "custom", path: ["selectedDates"], message: "Selected dinner dates must be unique days in the selected Monday week." });
+    }
+    seen.add(selectedDate);
+  }
 });
 export type WeeklyPlanPreferences = z.infer<typeof weeklyPlanPreferencesSchema>;
 
@@ -46,8 +56,8 @@ export type GeneratedRecipeDraft = z.infer<typeof generatedRecipeDraftSchema>;
 export const generatedDraftListSchema = z.object({ drafts: z.array(generatedRecipeDraftSchema).max(7) });
 
 export const weeklyPlanProposalItemSchema = z.discriminatedUnion("source", [
-  z.object({ plannedFor: dateSchema, source: z.literal("saved"), recipeId: z.string().uuid(), savedRecipe: z.object({ title: z.string(), description: z.string().nullable(), servings: z.number().nullable(), instructions: z.string(), ingredients: z.array(recipeIngredientSchema) }), rationale: z.string().trim().max(RECIPE_IMPORT_LIMITS.descriptionCharacters).default(""), reviewRequired: z.boolean().default(false) }),
-  z.object({ plannedFor: dateSchema, source: z.literal("generated"), draft: generatedRecipeDraftSchema, reviewRequired: z.boolean().default(true) }),
+  z.object({ plannedFor: dateSchema, source: z.literal("saved"), current: z.object({ plannedFor: dateSchema, recipeId: z.string().uuid(), recipeTitle: z.string(), status: z.enum(["planned", "completed", "skipped"]) }).nullable(), recipeId: z.string().uuid(), savedRecipe: z.object({ title: z.string(), description: z.string().nullable(), servings: z.number().nullable(), instructions: z.string(), ingredients: z.array(recipeIngredientSchema) }), rationale: z.string().trim().max(RECIPE_IMPORT_LIMITS.descriptionCharacters).default(""), reviewRequired: z.boolean().default(false) }),
+  z.object({ plannedFor: dateSchema, source: z.literal("generated"), current: z.object({ plannedFor: dateSchema, recipeId: z.string().uuid(), recipeTitle: z.string(), status: z.enum(["planned", "completed", "skipped"]) }).nullable(), draft: generatedRecipeDraftSchema, reviewRequired: z.boolean().default(true) }),
 ]);
 export type WeeklyPlanProposalItem = z.infer<typeof weeklyPlanProposalItemSchema>;
 
