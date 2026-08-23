@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { WeeklyDinnerPlanner } from "@/components/meal-planner/weekly-dinner-planner";
 import { WeeklyPlanGenerator } from "@/components/meal-planner/weekly-plan-generator";
+import type { WeeklyPlanExistingEntry } from "@/lib/domain/weekly-plan-types";
 import { requireHousehold } from "@/lib/auth/household";
 import { calendarWeekRange, isIsoCalendarDate } from "@/lib/domain/calendar";
 import { createClient } from "@/lib/supabase/server";
@@ -81,6 +82,12 @@ export default async function PlannerPage({
     ...entry,
     recipe: Array.isArray(entry.recipe) ? (entry.recipe[0] ?? null) : entry.recipe,
   }));
+  const existingEntries: WeeklyPlanExistingEntry[] = entries.map((entry) => ({
+    plannedFor: entry.planned_for,
+    recipeId: entry.recipe_id,
+    recipeTitle: entry.recipe?.title ?? "Untitled dinner",
+    status: entry.status,
+  }));
 
   return (
     <div className="space-y-8">
@@ -91,7 +98,7 @@ export default async function PlannerPage({
         </p>
       </div>
 
-      <WeeklyPlanGenerator recipes={recipesResult.data ?? []} weekStart={weekStart} />
+      <WeeklyPlanGenerator existingEntries={existingEntries} recipes={recipesResult.data ?? []} weekStart={weekStart} />
       <WeeklyDinnerPlanner entries={entries} recipes={recipesResult.data ?? []} weekStart={weekStart} />
     </div>
   );

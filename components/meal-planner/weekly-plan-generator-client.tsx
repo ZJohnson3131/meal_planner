@@ -4,233 +4,129 @@ import { useMemo, useState, useTransition } from "react";
 
 import type {
   GeneratedRecipeDraft,
-  WeeklyPlanPreferences,
+  WeeklyPlanEmptySlot,
+  WeeklyPlanExistingEntry,
+  WeeklyPlanGoal,
   WeeklyPlanProposal,
   WeeklyPlanProposalItem,
-  WeeklyPlanEmptySlot,
-  WeeklyPlanGoal,
+  WeeklyPlanPreferences,
 } from "@/lib/domain/weekly-plan-types";
 import { SUPPORTED_COOKING_UNITS } from "@/lib/domain/units";
+import { calendarDateToNeutralDate, calendarWeekDates } from "@/lib/domain/calendar";
 
 type SavedRecipe = { id: string; title: string; favorite: boolean };
-
 type WeeklyPlanGeneratorProps = {
   recipes: SavedRecipe[];
   weekStart: string;
+  existingEntries: WeeklyPlanExistingEntry[];
   confirmWeeklyPlan: (input: unknown) => Promise<{ success: true }>;
   generateWeeklyPlanProposal: (input: unknown) => Promise<WeeklyPlanProposal>;
 };
-
-const GOALS = [
-  ["simple", "Simple meals"],
-  ["high_protein", "High protein"],
-  ["budget_friendly", "Budget-friendly"],
-  ["family_friendly", "Family-friendly"],
-  ["vegetarian", "Vegetarian"],
-  ["pantry_friendly", "Pantry-friendly"],
-] as const;
-
+const GOALS = [["simple", "Simple meals"], ["high_protein", "High protein"], ["budget_friendly", "Budget-friendly"], ["family_friendly", "Family-friendly"], ["vegetarian", "Vegetarian"], ["pantry_friendly", "Pantry-friendly"]] as const satisfies ReadonlyArray<readonly [WeeklyPlanGoal, string]>;
+const DIETARY_OPTIONS = [["vegetarian", "Vegetarian"], ["vegan", "Vegan"], ["gluten", "Gluten-free"], ["dairy", "Dairy-free"]] as const;
+const EFFORT_OPTIONS = [["quick", "Quick", "Up to 30 minutes"], ["balanced", "Balanced", "Comfortable weeknight cooking"], ["project", "Cooking project", "More time for something special"]] as const;
 type DraftIngredient = GeneratedRecipeDraft["ingredients"][number];
-type ReviewItem = WeeklyPlanProposalItem & { accepted: boolean };
-type EmptyReviewItem = WeeklyPlanEmptySlot & { accepted: false };
-type AnyReviewItem = ReviewItem | EmptyReviewItem;
+type ProposalItem = WeeklyPlanProposalItem | WeeklyPlanEmptySlot;
+type ReviewItem = ProposalItem & { decision: "use" | "keep" | "leave" };
+type Step = "dates" | "preferences" | "review";
+type Effort = (typeof EFFORT_OPTIONS)[number][0];
+type PreferenceState = { householdSize: number; cookingEffort: Effort; goals: WeeklyPlanGoal[]; dietaryExclusions: string[]; likesDislikes: string; maxCookingMinutes: number | null; preferFavorites: boolean };
+const DEFAULT_PREFERENCES: PreferenceState = { householdSize: 2, cookingEffort: "balanced", goals: [], dietaryExclusions: [], likesDislikes: "", maxCookingMinutes: null, preferFavorites: false };
 
-function displayDate(value: string) {
-  return new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })
-    .format(new Date(`${value}T00:00:00Z`));
-}
+function displayDate(value: string) { return new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(calendarDateToNeutralDate(value)); }
+function shortDate(value: string) { return new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(calendarDateToNeutralDate(value)); }
+function emptyIngredient(): DraftIngredient { return { itemName: "", quantity: null, unit: null, notes: null }; }
+function statusLabel(status: WeeklyPlanExistingEntry["status"]) { return status === "planned" ? "Planned" : status === "skipped" ? "Skipped" : "Settled"; }
+function initialDecision(item: ProposalItem): ReviewItem["decision"] { return item.source === "empty" ? "leave" : item.current ? "keep" : "use"; }
 
-function emptyIngredient(): DraftIngredient {
-  return { itemName: "", quantity: null, unit: null, notes: null };
-}
-
-function updateDraft(item: ReviewItem, patch: Partial<GeneratedRecipeDraft>): ReviewItem {
-  if (item.source !== "generated") return item;
-  return { ...item, draft: { ...item.draft, ...patch } };
-}
-
-function promoteEmptySlot(item: EmptyReviewItem, patch: Partial<GeneratedRecipeDraft>): ReviewItem {
-  return {
-    plannedFor: item.plannedFor,
-    source: "generated",
-    draft: { ...item.draft, ...patch },
-    reviewRequired: true,
-    accepted: false,
-  };
-}
-
-/** Collects preferences, then holds the proposal entirely in UI state until explicit confirmation. */
-export function WeeklyPlanGeneratorClient({
-  recipes,
-  weekStart,
-  confirmWeeklyPlan,
-  generateWeeklyPlanProposal,
-}: WeeklyPlanGeneratorProps) {
+/** Three-step local wizard. No proposal or answer is persisted until confirmation. */
+export function WeeklyPlanGeneratorClient({ recipes, weekStart, existingEntries, confirmWeeklyPlan, generateWeeklyPlanProposal }: WeeklyPlanGeneratorProps) {
+  const weekDates = useMemo(() => calendarWeekDates(weekStart), [weekStart]);
+  const completedDates = useMemo(() => new Set(existingEntries.filter((entry) => entry.status === "completed").map((entry) => entry.plannedFor)), [existingEntries]);
+  const entryByDate = useMemo(() => new Map(existingEntries.map((entry) => [entry.plannedFor, entry])), [existingEntries]);
+  const defaultSelectedDates = useMemo(() => weekDates.filter((date) => !entryByDate.has(date)), [entryByDate, weekDates]);
+  const [step, setStep] = useState<Step>("dates");
+  const [selectedDates, setSelectedDates] = useState<string[]>(defaultSelectedDates);
+  const [preferences, setPreferences] = useState<PreferenceState>(DEFAULT_PREFERENCES);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [proposal, setProposal] = useState<WeeklyPlanProposal | null>(null);
-  const [items, setItems] = useState<AnyReviewItem[]>([]);
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isGenerating, startGenerating] = useTransition();
   const [isConfirming, startConfirming] = useTransition();
-  const acceptedCount = useMemo(() => items.filter((item) => item.accepted).length, [items]);
+  const approvedItems = reviewItems.filter((item) => item.decision === "use");
 
-  function generate(formData: FormData) {
-    const selectedGoals = formData.getAll("goals").map(String) as WeeklyPlanGoal[];
-    const preferences: WeeklyPlanPreferences = {
-      weekStart,
-      householdSize: Number(formData.get("householdSize")),
-      dinnerCount: Number(formData.get("dinnerCount")),
-      goals: selectedGoals,
-      maxCookingMinutes: formData.get("maxCookingMinutes") ? Number(formData.get("maxCookingMinutes")) : null,
-      dietaryExclusions: String(formData.get("dietaryExclusions") ?? "").split(",").map((item) => item.trim()).filter(Boolean),
-      likesDislikes: String(formData.get("likesDislikes") ?? "").trim() || null,
-      preferFavorites: formData.get("preferFavorites") === "on",
-    };
-
+  function toggleDate(date: string) {
+    if (completedDates.has(date)) return;
+    setSelectedDates((current) => current.includes(date) ? current.filter((value) => value !== date) : [...current, date].sort());
     setError(null);
-    setSuccess(null);
+  }
+  function toggleArrayValue(key: "goals" | "dietaryExclusions", value: string) {
+    setPreferences((current) => {
+      const values = current[key] as string[];
+      return { ...current, [key]: values.includes(value) ? values.filter((item) => item !== value) : [...values, value] };
+    });
+  }
+  function generate() {
+    if (selectedDates.length === 0) { setError("Choose at least one night to plan."); return; }
+    const input: WeeklyPlanPreferences = { weekStart, selectedDates, householdSize: preferences.householdSize, cookingEffort: preferences.cookingEffort, goals: preferences.goals, maxCookingMinutes: preferences.maxCookingMinutes, dietaryExclusions: preferences.dietaryExclusions, likesDislikes: preferences.likesDislikes.trim() || null, preferFavorites: preferences.preferFavorites };
+    setError(null); setSuccess(null);
     startGenerating(async () => {
-      try {
-        const nextProposal = await generateWeeklyPlanProposal(preferences);
-        setProposal(nextProposal);
-        setItems(nextProposal.items.map((item) => item.source === "empty"
-          ? { ...item, accepted: false as const }
-          : { ...item, accepted: true }));
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "We could not generate a weekly proposal. Please try again.");
-      }
+      try { const nextProposal = await generateWeeklyPlanProposal(input); setProposal(nextProposal); setReviewItems(nextProposal.items.map((item) => ({ ...item, decision: initialDecision(item) }))); setStep("review"); }
+      catch (caught) { setError(caught instanceof Error ? caught.message : "We could not generate a weekly proposal. Please try again."); }
     });
   }
-
-  function replaceWithSaved(itemIndex: number, recipeId: string) {
-    const savedRecipe = recipes.find((recipe) => recipe.id === recipeId);
-    if (!savedRecipe) return;
-    setItems((current) => current.map((item, index) => index === itemIndex ? {
-      plannedFor: item.plannedFor,
-      source: "saved",
-      recipeId: savedRecipe.id,
-      savedRecipe: {
-        title: savedRecipe.title,
-        description: null,
-        servings: null,
-        instructions: "",
-        ingredients: [],
-      },
-      rationale: `Replaced with saved recipe: ${savedRecipe.title}.`,
-      reviewRequired: false,
-      accepted: item.accepted,
-    } : item));
+  function updateReview(index: number, patch: Partial<ReviewItem>) { setReviewItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } as ReviewItem : item)); }
+  function replaceWithSaved(index: number, recipeId: string) {
+    const savedRecipe = recipes.find((recipe) => recipe.id === recipeId); if (!savedRecipe) return;
+    const item = reviewItems[index];
+    setReviewItems((current) => current.map((value, itemIndex) => itemIndex === index ? { plannedFor: item.plannedFor, source: "saved", current: item.current, recipeId: savedRecipe.id, savedRecipe: { title: savedRecipe.title, description: null, servings: null, instructions: "", ingredients: [] }, rationale: `Replaced with saved recipe: ${savedRecipe.title}.`, reviewRequired: false, decision: item.decision } : value));
   }
-
   function confirm() {
-    setError(null);
-    setSuccess(null);
+    if (approvedItems.length === 0) return;
+    setError(null); setSuccess(null);
     startConfirming(async () => {
-      try {
-        await confirmWeeklyPlan({ weekStart, items: items.filter((item) => item.accepted) });
-        setSuccess(`${acceptedCount} dinner${acceptedCount === 1 ? "" : "s"} saved to your plan.`);
-        setProposal(null);
-        setItems([]);
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Your plan was not finalised. Review it and try again.");
-      }
+      try { await confirmWeeklyPlan({ weekStart, items: approvedItems }); setSuccess(`${approvedItems.length} dinner${approvedItems.length === 1 ? "" : "s"} saved to your plan.`); setProposal(null); setReviewItems([]); setStep("dates"); setSelectedDates(defaultSelectedDates); }
+      catch (caught) { setError(caught instanceof Error ? caught.message : "Your plan was not finalised. Review it and try again."); }
     });
   }
+  function startOver() { setStep("dates"); setSelectedDates(defaultSelectedDates); setPreferences(DEFAULT_PREFERENCES); setMoreOpen(false); setProposal(null); setReviewItems([]); setError(null); setSuccess(null); }
 
-  return (
-    <section aria-labelledby="plan-my-week-heading" className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-5 shadow-sm sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-950" id="plan-my-week-heading">Plan my week</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-700">Build a dinner proposal for {displayDate(weekStart)} onward. Saved recipes are considered first; generated drafts are never saved until you confirm.</p>
-        </div>
-        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-200">Local Ollama only</span>
-      </div>
-
-      {!proposal ? (
-        <form action={generate} className="mt-6 space-y-5" noValidate>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-household-size">People to serve
-              <input className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue="2" id="weekly-plan-household-size" min="1" name="householdSize" required type="number" />
-            </label>
-            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-dinner-count">Dinners to plan
-              <input className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2" defaultValue="7" id="weekly-plan-dinner-count" max="7" min="1" name="dinnerCount" required type="number" />
-            </label>
-            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-cooking-time">Maximum cooking time <span className="font-normal text-slate-600">(optional)</span>
-              <div className="mt-1 flex rounded-md shadow-sm"><input className="block w-full rounded-l-md border border-slate-300 bg-white px-3 py-2" id="weekly-plan-cooking-time" min="1" name="maxCookingMinutes" type="number" /><span className="inline-flex items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-100 px-3 text-sm text-slate-600">min</span></div>
-            </label>
-          </div>
-          <fieldset aria-describedby="weekly-plan-goals-help">
-            <legend className="text-sm font-medium text-slate-800">Weekly goals <span className="font-normal text-slate-600">(optional)</span></legend>
-            <p className="mt-1 text-sm text-slate-600" id="weekly-plan-goals-help">Leave these unselected if you have no particular meal preferences.</p>
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-              {GOALS.map(([value, label]) => <label className="flex items-center gap-2 text-sm text-slate-700" key={value}><input className="size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" name="goals" type="checkbox" value={value} />{label}</label>)}
-            </div>
-          </fieldset>
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-exclusions">Dietary exclusions <span className="font-normal text-slate-600">(optional, comma-separated)</span>
-              <input className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2" id="weekly-plan-exclusions" name="dietaryExclusions" placeholder="e.g. peanuts, shellfish" />
-            </label>
-            <label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-likes">Likes and dislikes <span className="font-normal text-slate-600">(optional)</span>
-              <input className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2" id="weekly-plan-likes" name="likesDislikes" placeholder="e.g. likes spicy food, avoids mushrooms" />
-            </label>
-          </div>
-          <label className="flex items-start gap-2 text-sm text-slate-800"><input className="mt-1 size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" name="preferFavorites" type="checkbox" /> <span><span className="font-medium">Prefer favourite saved recipes</span><br /><span className="text-slate-600">Favourites receive a ranking boost, but are not forced when they conflict with your preferences.</span></span></label>
-          <aside className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950" role="note"><strong>Check dietary and allergen suitability yourself.</strong> Suggestions are not nutrition, allergy, or medical advice. Review every ingredient and method before saving.</aside>
-          <button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={isGenerating} type="submit">{isGenerating ? "Generating proposal…" : "Generate dinner proposal"}</button>
-        </form>
-      ) : (
-        <div className="mt-6 space-y-5">
-          <div aria-live="polite" className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-700">
-            <p className="font-medium text-slate-950">Review your proposal before anything is saved.</p>
-            <p className="mt-1">Accept, edit, replace, or remove each dinner. {proposal.ollama.status !== "ready" ? `Local model status: ${proposal.ollama.status.replace("_", " ")}${proposal.ollama.message ? ` — ${proposal.ollama.message}` : ""}.` : "Generated drafts are editable before confirmation."}</p>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {items.map((item, index) => <ProposalCard item={item} index={index} key={`${item.plannedFor}-${index}`} onChange={(next) => setItems((current) => current.map((value, itemIndex) => itemIndex === index ? next : value))} onReplace={(recipeId) => replaceWithSaved(index, recipeId)} recipes={recipes} />)}
-          </div>
-          <div className="flex flex-wrap items-center gap-3 border-t border-emerald-200 pt-5">
-            <button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={isConfirming || acceptedCount === 0} onClick={confirm} type="button">{isConfirming ? "Saving plan…" : `Confirm and save ${acceptedCount} dinner${acceptedCount === 1 ? "" : "s"}`}</button>
-            <button className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700" onClick={() => { setProposal(null); setItems([]); }} type="button">Start over</button>
-            <p className="text-sm text-slate-600">Confirmation creates accepted generated recipes and assigns accepted dinners to this week.</p>
-          </div>
-        </div>
-      )}
-      {error ? <p aria-live="assertive" className="mt-4 text-sm font-medium text-red-700" role="alert">{error}</p> : null}
-      {success ? <p aria-live="polite" className="mt-4 text-sm font-medium text-emerald-800" role="status">{success}</p> : null}
-    </section>
-  );
+  return <section aria-labelledby="plan-my-week-heading" className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-5 shadow-sm sm:p-6">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-semibold text-slate-950" id="plan-my-week-heading">Plan my week</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-700">Choose your nights, set a few preferences, then review every proposed dinner before anything is saved.</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-200">Local Ollama only</span></div>
+    <ol aria-label="Planning progress" className="mt-6 grid grid-cols-3 gap-2 text-xs font-semibold sm:text-sm">{([["dates", "1", "Choose nights"], ["preferences", "2", "Preferences"], ["review", "3", "Review"]] as const).map(([value, number, label]) => <li className={`border-t-2 pt-2 ${step === value ? "border-emerald-700 text-emerald-900" : "border-slate-300 text-slate-500"}`} key={value}><span aria-current={step === value ? "step" : undefined}>{number}. {label}</span></li>)}</ol>
+    {step === "dates" ? <DateStep completedDates={completedDates} entryByDate={entryByDate} selectedDates={selectedDates} weekDates={weekDates} onContinue={() => { setError(null); setStep("preferences"); }} onToggle={toggleDate} /> : null}
+    {step === "preferences" ? <PreferencesStep isGenerating={isGenerating} moreOpen={moreOpen} preferences={preferences} selectedCount={selectedDates.length} onBack={() => setStep("dates")} onGenerate={generate} onMore={() => setMoreOpen((open) => !open)} onPreferenceChange={setPreferences} onToggle={toggleArrayValue} /> : null}
+    {step === "review" && proposal ? <ReviewPanel isConfirming={isConfirming} items={reviewItems} onBack={() => setStep("preferences")} onChange={updateReview} onConfirm={confirm} onReplace={replaceWithSaved} onRetry={() => { setProposal(null); setReviewItems([]); setStep("preferences"); }} onStartOver={startOver} proposal={proposal} recipes={recipes} /> : null}
+    {error ? <p aria-live="assertive" className="mt-4 text-sm font-medium text-red-700" role="alert">{error}</p> : null}{success ? <p aria-live="polite" className="mt-4 text-sm font-medium text-emerald-800" role="status">{success}</p> : null}
+  </section>;
 }
 
-function ProposalCard({ item, index, onChange, onReplace, recipes }: { item: AnyReviewItem; index: number; onChange: (item: AnyReviewItem) => void; onReplace: (recipeId: string) => void; recipes: SavedRecipe[] }) {
+function DateStep({ weekDates, selectedDates, entryByDate, completedDates, onToggle, onContinue }: { weekDates: readonly string[]; selectedDates: string[]; entryByDate: Map<string, WeeklyPlanExistingEntry>; completedDates: Set<string>; onToggle: (date: string) => void; onContinue: () => void }) {
+  return <div className="mt-6 space-y-5"><div><h3 className="text-lg font-semibold text-slate-950">Which nights should we plan?</h3><p className="mt-1 text-sm text-slate-600">Open nights are selected for you. Choose a planned or skipped night if you want a fresh suggestion.</p></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{weekDates.map((date) => { const entry = entryByDate.get(date); const completed = completedDates.has(date); const selected = selectedDates.includes(date); return <button aria-disabled={completed} aria-pressed={selected} className={`rounded-lg border p-4 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${completed ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500" : selected ? "border-emerald-600 bg-white text-slate-950 shadow-sm" : "border-slate-200 bg-white/70 text-slate-700 hover:border-emerald-400"}`} disabled={completed} key={date} onClick={() => onToggle(date)} type="button"><span className="block text-sm font-semibold">{shortDate(date)}</span><span className="mt-2 block text-xs">{completed ? "Settled — protected" : entry ? `${statusLabel(entry.status)} · ${entry.recipeTitle}` : "Open night"}</span>{!completed ? <span className={`mt-3 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${selected ? "bg-emerald-100 text-emerald-900" : "bg-slate-100 text-slate-600"}`}>{selected ? "Selected" : "Not selected"}</span> : null}</button>; })}</div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-200 pt-5"><p className="text-sm font-medium text-slate-700">{selectedDates.length} night{selectedDates.length === 1 ? "" : "s"} selected</p><button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={selectedDates.length === 0} onClick={onContinue} type="button">Continue to preferences</button></div></div>;
+}
+
+function PreferencesStep({ preferences, selectedCount, moreOpen, isGenerating, onPreferenceChange, onToggle, onMore, onBack, onGenerate }: { preferences: PreferenceState; selectedCount: number; moreOpen: boolean; isGenerating: boolean; onPreferenceChange: React.Dispatch<React.SetStateAction<PreferenceState>>; onToggle: (key: "goals" | "dietaryExclusions", value: string) => void; onMore: () => void; onBack: () => void; onGenerate: () => void }) {
+  return <div className="mt-6 space-y-6"><div><h3 className="text-lg font-semibold text-slate-950">What sounds right this week?</h3><p className="mt-1 text-sm text-slate-600">Planning {selectedCount} night{selectedCount === 1 ? "" : "s"}. These choices guide saved-recipe ranking and local draft generation.</p></div><ChoiceGroup label="How many people are you cooking for?">{[1, 2, 3, 4, 5, 6].map((size) => <ChoiceButton active={preferences.householdSize === size} key={size} onClick={() => onPreferenceChange((current) => ({ ...current, householdSize: size }))}>{size} {size === 1 ? "person" : "people"}</ChoiceButton>)}</ChoiceGroup><ChoiceGroup label="Cooking effort">{EFFORT_OPTIONS.map(([value, label, description]) => <ChoiceButton active={preferences.cookingEffort === value} description={description} key={value} onClick={() => onPreferenceChange((current) => ({ ...current, cookingEffort: value }))}>{label}</ChoiceButton>)}</ChoiceGroup><ChoiceGroup label="Weekly goals" optional>{GOALS.map(([value, label]) => <ChoiceButton active={preferences.goals.includes(value)} key={value} onClick={() => onToggle("goals", value)}>{label}</ChoiceButton>)}</ChoiceGroup><ChoiceGroup label="Dietary preferences" optional>{DIETARY_OPTIONS.map(([value, label]) => <ChoiceButton active={preferences.dietaryExclusions.includes(value)} key={value} onClick={() => onToggle("dietaryExclusions", value)}>{label}</ChoiceButton>)}</ChoiceGroup><div><button aria-expanded={moreOpen} className="text-sm font-semibold text-emerald-800 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-emerald-700" onClick={onMore} type="button">{moreOpen ? "Hide more preferences" : "More preferences"}</button>{moreOpen ? <div className="mt-4 grid gap-4 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-custom-time">Custom cooking time <span className="font-normal text-slate-600">(optional)</span><div className="mt-1 flex"><input className="w-full rounded-l-md border border-slate-300 px-3 py-2" id="weekly-plan-custom-time" min="1" onChange={(event) => onPreferenceChange((current) => ({ ...current, maxCookingMinutes: event.target.value ? Number(event.target.value) : null }))} type="number" value={preferences.maxCookingMinutes ?? ""} /><span className="inline-flex items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-100 px-3 text-sm text-slate-600">min</span></div></label><label className="text-sm font-medium text-slate-800" htmlFor="weekly-plan-likes">Likes and dislikes <span className="font-normal text-slate-600">(optional)</span><input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2" id="weekly-plan-likes" onChange={(event) => onPreferenceChange((current) => ({ ...current, likesDislikes: event.target.value }))} placeholder="e.g. likes spicy food, avoids mushrooms" value={preferences.likesDislikes} /></label><label className="flex items-start gap-2 text-sm text-slate-800 sm:col-span-2"><input checked={preferences.preferFavorites} className="mt-1 size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" onChange={(event) => onPreferenceChange((current) => ({ ...current, preferFavorites: event.target.checked }))} type="checkbox" /><span><span className="font-medium">Prefer favourite saved recipes</span><br /><span className="text-slate-600">Favourites receive a ranking boost when they fit.</span></span></label></div> : null}</div><aside className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-950" role="note"><strong>Review dietary and allergen suitability yourself.</strong> Suggestions are not nutrition, allergy, or medical advice.</aside><div className="flex flex-wrap gap-3 border-t border-emerald-200 pt-5"><button className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 focus-visible:outline-2 focus-visible:outline-emerald-700" onClick={onBack} type="button">Back</button><button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={isGenerating} onClick={onGenerate} type="button">{isGenerating ? "Generating proposals…" : "See proposed dinners"}</button></div></div>;
+}
+
+function ChoiceGroup({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) { return <fieldset><legend className="text-sm font-semibold text-slate-800">{label} {optional ? <span className="font-normal text-slate-500">(optional)</span> : null}</legend><div className="mt-2 flex flex-wrap gap-2">{children}</div></fieldset>; }
+function ChoiceButton({ active, children, description, onClick }: { active: boolean; children: React.ReactNode; description?: string; onClick: () => void }) { return <button aria-pressed={active} className={`rounded-lg border px-3 py-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 ${active ? "border-emerald-600 bg-emerald-100 text-emerald-950" : "border-slate-300 bg-white text-slate-700 hover:border-emerald-400"}`} onClick={onClick} type="button"><span className="block font-medium">{children}</span>{description ? <span className="mt-1 block text-xs text-slate-600">{description}</span> : null}</button>; }
+
+function ReviewPanel({ proposal, items, recipes, isConfirming, onChange, onReplace, onBack, onRetry, onStartOver, onConfirm }: { proposal: WeeklyPlanProposal; items: ReviewItem[]; recipes: SavedRecipe[]; isConfirming: boolean; onChange: (index: number, patch: Partial<ReviewItem>) => void; onReplace: (index: number, recipeId: string) => void; onBack: () => void; onRetry: () => void; onStartOver: () => void; onConfirm: () => void }) {
+  const approvedCount = items.filter((item) => item.decision === "use").length;
+  return <div className="mt-6 space-y-5"><div aria-live="polite" className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-700"><p className="font-medium text-slate-950">Review your proposed changes.</p><p className="mt-1">Only dinners marked “Use suggestion” will be saved. Current planned and skipped dinners stay unchanged unless you approve a replacement. {proposal.ollama.status !== "ready" ? `Local model status: ${proposal.ollama.status.replace("_", " ")}${proposal.ollama.message ? ` — ${proposal.ollama.message}` : ""}.` : "Generated drafts remain editable."}</p></div><div className="space-y-3">{items.map((item, index) => <ReviewRow item={item} index={index} key={`${item.plannedFor}-${index}`} onChange={(patch) => onChange(index, patch)} onReplace={(recipeId) => onReplace(index, recipeId)} recipes={recipes} />)}</div><div className="flex flex-wrap items-center gap-3 border-t border-emerald-200 pt-5"><button className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 focus-visible:outline-2 focus-visible:outline-emerald-700" onClick={onBack} type="button">Back</button>{proposal.ollama.status !== "ready" ? <button className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-950 focus-visible:outline-2 focus-visible:outline-amber-700" onClick={onRetry} type="button">Try again</button> : null}<button className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={isConfirming || approvedCount === 0} onClick={onConfirm} type="button">{isConfirming ? "Saving plan…" : `Save ${approvedCount} approved dinner${approvedCount === 1 ? "" : "s"}`}</button><button className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 focus-visible:outline-2 focus-visible:outline-emerald-700" onClick={onStartOver} type="button">Start over</button></div></div>;
+}
+
+function ReviewRow({ item, index, recipes, onChange, onReplace }: { item: ReviewItem; index: number; recipes: SavedRecipe[]; onChange: (patch: Partial<ReviewItem>) => void; onReplace: (recipeId: string) => void }) {
   const title = item.source === "saved" ? item.savedRecipe.title : item.source === "generated" && item.draft.title ? item.draft.title : "Empty dinner slot";
-  const badge = item.source === "saved" ? "Saved recipe" : item.source === "generated" ? "Generated draft" : "Needs a recipe";
-  const badgeClass = item.source === "saved" ? "bg-sky-100 text-sky-900" : item.source === "generated" ? "bg-violet-100 text-violet-900" : "bg-amber-100 text-amber-900";
-  const draft = item.source === "generated" || item.source === "empty" ? item.draft : undefined;
+  const draft = item.source === "generated" || item.source === "empty" ? item.draft : null;
   const rationale = item.source === "generated" ? item.draft.rationale : item.source === "saved" ? item.rationale : item.reason;
-  const savedDetails = item.source === "saved" ? item.savedRecipe : null;
-  return <article className={`rounded-lg border bg-white p-4 shadow-sm ${item.accepted ? "border-slate-200" : "border-slate-200 opacity-70"}`}>
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{displayDate(item.plannedFor)}</p><h3 className="mt-1 text-lg font-semibold text-slate-950">{title}</h3></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClass}`}>{badge}</span></div>
-    {item.reviewRequired ? <p className="mt-3 rounded-md bg-amber-50 p-2 text-sm text-amber-900">This suggestion needs extra review against your stated preferences.</p> : null}
-    <p className="mt-3 text-sm leading-6 text-slate-700"><span className="font-medium text-slate-900">Why it fits:</span> {rationale}</p>
-    {draft ? <DraftEditor draft={draft} onChange={(patch) => onChange(item.source === "empty" ? promoteEmptySlot(item, patch) : updateDraft(item, patch))} /> : savedDetails ? <SavedRecipeDetails recipe={savedDetails} /> : null}
-    <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-      {item.source !== "empty" ? <label className="flex items-center gap-2 text-sm font-medium text-slate-800"><input checked={item.accepted} className="size-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600" onChange={(event) => onChange({ ...item, accepted: event.target.checked })} type="checkbox" />Accept this dinner</label> : <p className="text-sm text-amber-900">Complete this editable recipe, or replace it with a saved recipe, before confirming.</p>}
-      <label className="text-sm text-slate-700" htmlFor={`replace-${index}`}><span className="sr-only">Replace {title}</span><select className="rounded-md border border-slate-300 bg-white px-2 py-1.5" defaultValue="" id={`replace-${index}`} onChange={(event) => { if (event.target.value) onReplace(event.target.value); }}><option value="">Replace with saved recipe…</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.favorite ? "★ " : ""}{recipe.title}</option>)}</select></label>
-      {item.source !== "empty" ? <button className="text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-950" onClick={() => onChange({ ...item, accepted: false })} type="button">Remove</button> : null}
-    </div>
-  </article>;
+  return <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium text-slate-600">{displayDate(item.plannedFor)}</p><h3 className="mt-1 text-lg font-semibold text-slate-950">{title}</h3></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.source === "generated" ? "bg-violet-100 text-violet-900" : item.source === "saved" ? "bg-sky-100 text-sky-900" : "bg-amber-100 text-amber-900"}`}>{item.source === "generated" ? "Generated draft" : item.source === "saved" ? "Saved recipe" : "Needs a recipe"}</span></div>{item.current ? <div className="mt-3 grid gap-2 rounded-md bg-slate-50 p-3 text-sm sm:grid-cols-2"><div><p className="font-semibold text-slate-700">Current dinner</p><p className="mt-1 text-slate-900">{item.current.recipeTitle}</p><p className="text-xs text-slate-600">{statusLabel(item.current.status)}</p></div><div><p className="font-semibold text-slate-700">Proposed replacement</p><p className="mt-1 text-slate-900">{title}</p></div></div> : null}<p className="mt-3 text-sm leading-6 text-slate-700"><span className="font-medium text-slate-900">Why it fits:</span> {rationale}</p>{draft ? <DraftEditor draft={draft} onChange={(patch) => onChange(item.source === "empty" ? { ...promoteEmpty(item), draft: { ...item.draft, ...patch }, decision: item.decision } : updateDraft(item, patch))} /> : item.source === "saved" ? <SavedRecipeDetails recipe={item.savedRecipe} /> : null}<div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">{item.current ? <><button aria-pressed={item.decision === "keep"} className={`rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-emerald-700 ${item.decision === "keep" ? "bg-slate-200 text-slate-900" : "border border-slate-300 text-slate-700"}`} onClick={() => onChange({ decision: "keep" })} type="button">Keep current</button><button aria-pressed={item.decision === "use"} className={`rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-emerald-700 ${item.decision === "use" ? "bg-emerald-700 text-white" : "border border-slate-300 text-slate-700"}`} onClick={() => onChange({ decision: "use" })} type="button">Use suggestion</button></> : item.source === "empty" ? <><button aria-pressed={item.decision === "use"} className="rounded-md border border-emerald-600 px-3 py-2 text-sm font-medium text-emerald-900 focus-visible:outline-2 focus-visible:outline-emerald-700" onClick={() => onChange({ decision: "use" })} type="button">Use suggestion</button><button aria-pressed={item.decision === "leave"} className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 focus-visible:outline-2 focus-visible:outline-emerald-700" onClick={() => onChange({ decision: "leave" })} type="button">Leave empty</button></> : <><button aria-pressed={item.decision === "use"} className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white" onClick={() => onChange({ decision: "use" })} type="button">Use suggestion</button><button aria-pressed={item.decision === "leave"} className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={() => onChange({ decision: "leave" })} type="button">Leave empty</button></>}<label className="text-sm text-slate-700" htmlFor={`replace-${index}`}><span className="sr-only">Replace {title}</span><select className="rounded-md border border-slate-300 bg-white px-2 py-1.5" defaultValue="" id={`replace-${index}`} onChange={(event) => { if (event.target.value) onReplace(event.target.value); }}><option value="">Replace with saved recipe…</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.favorite ? "★ " : ""}{recipe.title}</option>)}</select></label></div></article>;
 }
 
-function SavedRecipeDetails({ recipe }: { recipe: Extract<WeeklyPlanProposalItem, { source: "saved" }>["savedRecipe"] }) {
-  return <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
-    <p>{recipe.servings ? `${recipe.servings} servings` : "Servings not recorded"}{recipe.description ? ` · ${recipe.description}` : ""}</p>
-    {recipe.ingredients.length > 0 ? <p className="mt-2"><span className="font-medium text-slate-900">Ingredients:</span> {recipe.ingredients.map((ingredient) => ingredient.itemName).join(", ")}</p> : null}
-    {recipe.instructions ? <p className="mt-2 line-clamp-3"><span className="font-medium text-slate-900">Method:</span> {recipe.instructions}</p> : null}
-    <p className="mt-2">This uses a recipe already saved in your library. You can replace it before confirmation.</p>
-  </div>;
-}
-
-function DraftEditor({ draft, onChange }: { draft: GeneratedRecipeDraft; onChange: (patch: Partial<GeneratedRecipeDraft>) => void }) {
-  const updateIngredient = (index: number, patch: Partial<DraftIngredient>) => onChange({ ingredients: draft.ingredients.map((ingredient, ingredientIndex) => ingredientIndex === index ? { ...ingredient, ...patch } : ingredient) });
-  return <div className="mt-4 space-y-3"><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium text-slate-800">Recipe title<input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" onChange={(event) => onChange({ title: event.target.value })} value={draft.title} /></label><label className="text-sm font-medium text-slate-800">Servings<input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" min="1" onChange={(event) => onChange({ servings: Number(event.target.value) })} type="number" value={draft.servings} /></label><label className="text-sm font-medium text-slate-800">Cooking time <span className="font-normal text-slate-600">(minutes)</span><input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" min="1" onChange={(event) => onChange({ estimatedMinutes: event.target.value ? Number(event.target.value) : null })} type="number" value={draft.estimatedMinutes ?? ""} /></label><label className="text-sm font-medium text-slate-800">Why this recipe fits<input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" onChange={(event) => onChange({ rationale: event.target.value })} value={draft.rationale} /></label></div><fieldset><legend className="text-sm font-medium text-slate-800">Ingredients</legend><div className="mt-2 space-y-2">{draft.ingredients.map((ingredient, index) => <div className="grid gap-2 rounded-md border border-slate-200 p-2 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_auto]" key={index}><label><span className="sr-only">Ingredient {index + 1} name</span><input className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" onChange={(event) => updateIngredient(index, { itemName: event.target.value })} value={ingredient.itemName} /></label><label><span className="sr-only">Ingredient {index + 1} quantity</span><input className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" min="0" onChange={(event) => updateIngredient(index, { quantity: event.target.value ? Number(event.target.value) : null })} placeholder="Qty" type="number" value={ingredient.quantity ?? ""} /></label><label><span className="sr-only">Ingredient {index + 1} unit</span><select className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" onChange={(event) => updateIngredient(index, { unit: (event.target.value || null) as DraftIngredient["unit"] })} value={ingredient.unit ?? ""}><option value="">Unit</option>{SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select></label><button className="text-sm font-medium text-slate-700 underline" onClick={() => onChange({ ingredients: draft.ingredients.filter((_, ingredientIndex) => ingredientIndex !== index) })} type="button">Remove</button></div>)}</div><button className="mt-2 text-sm font-medium text-emerald-800 underline" onClick={() => onChange({ ingredients: [...draft.ingredients, emptyIngredient()] })} type="button">Add ingredient</button></fieldset><label className="block text-sm font-medium text-slate-800">Method<textarea className="mt-1 block min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 font-normal" onChange={(event) => onChange({ instructions: event.target.value })} value={draft.instructions} /></label></div>;
-}
+function promoteEmpty(item: Extract<ProposalItem, { source: "empty" }>): Extract<WeeklyPlanProposalItem, { source: "generated" }> { return { plannedFor: item.plannedFor, current: item.current, source: "generated", draft: item.draft, reviewRequired: true }; }
+function updateDraft(item: ReviewItem, patch: Partial<GeneratedRecipeDraft>): ReviewItem { return item.source === "generated" ? { ...item, draft: { ...item.draft, ...patch } } : item; }
+function SavedRecipeDetails({ recipe }: { recipe: Extract<WeeklyPlanProposalItem, { source: "saved" }>["savedRecipe"] }) { return <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700"><p>{recipe.servings ? `${recipe.servings} servings` : "Servings not recorded"}{recipe.description ? ` · ${recipe.description}` : ""}</p>{recipe.ingredients.length > 0 ? <p className="mt-2"><span className="font-medium text-slate-900">Ingredients:</span> {recipe.ingredients.map((ingredient) => ingredient.itemName).join(", ")}</p> : null}{recipe.instructions ? <p className="mt-2 line-clamp-3"><span className="font-medium text-slate-900">Method:</span> {recipe.instructions}</p> : null}</div>; }
+function DraftEditor({ draft, onChange }: { draft: GeneratedRecipeDraft; onChange: (patch: Partial<GeneratedRecipeDraft>) => void }) { const updateIngredient = (index: number, patch: Partial<DraftIngredient>) => onChange({ ingredients: draft.ingredients.map((ingredient, ingredientIndex) => ingredientIndex === index ? { ...ingredient, ...patch } : ingredient) }); return <div className="mt-4 space-y-3"><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium text-slate-800">Recipe title<input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" onChange={(event) => onChange({ title: event.target.value })} value={draft.title} /></label><label className="text-sm font-medium text-slate-800">Servings<input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" min="1" onChange={(event) => onChange({ servings: Number(event.target.value) })} type="number" value={draft.servings} /></label><label className="text-sm font-medium text-slate-800">Cooking time <span className="font-normal text-slate-600">(minutes)</span><input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" min="1" onChange={(event) => onChange({ estimatedMinutes: event.target.value ? Number(event.target.value) : null })} type="number" value={draft.estimatedMinutes ?? ""} /></label><label className="text-sm font-medium text-slate-800">Why this recipe fits<input className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 font-normal" onChange={(event) => onChange({ rationale: event.target.value })} value={draft.rationale} /></label></div><fieldset><legend className="text-sm font-medium text-slate-800">Ingredients</legend><div className="mt-2 space-y-2">{draft.ingredients.map((ingredient, index) => <div className="grid gap-2 rounded-md border border-slate-200 p-2 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_auto]" key={index}><label><span className="sr-only">Ingredient {index + 1} name</span><input className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" onChange={(event) => updateIngredient(index, { itemName: event.target.value })} value={ingredient.itemName} /></label><label><span className="sr-only">Ingredient {index + 1} quantity</span><input className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" min="0" onChange={(event) => updateIngredient(index, { quantity: event.target.value ? Number(event.target.value) : null })} placeholder="Qty" type="number" value={ingredient.quantity ?? ""} /></label><label><span className="sr-only">Ingredient {index + 1} unit</span><select className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" onChange={(event) => updateIngredient(index, { unit: (event.target.value || null) as DraftIngredient["unit"] })} value={ingredient.unit ?? ""}><option value="">Unit</option>{SUPPORTED_COOKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select></label><button className="text-sm font-medium text-slate-700 underline" onClick={() => onChange({ ingredients: draft.ingredients.filter((_, ingredientIndex) => ingredientIndex !== index) })} type="button">Remove</button></div>)}</div><button className="mt-2 text-sm font-medium text-emerald-800 underline" onClick={() => onChange({ ingredients: [...draft.ingredients, emptyIngredient()] })} type="button">Add ingredient</button></fieldset><label className="block text-sm font-medium text-slate-800">Method<textarea className="mt-1 block min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 font-normal" onChange={(event) => onChange({ instructions: event.target.value })} value={draft.instructions} /></label></div>; }
